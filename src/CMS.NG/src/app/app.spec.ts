@@ -51,6 +51,20 @@ describe('App shell', () => {
     expect(links.map((link) => link.getAttribute('href'))).toContain('/publish-statuses');
   });
 
+  it('renders the 課程管理 Course group and links Partner to /partners', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+
+    const text: string = fixture.nativeElement.textContent;
+    expect(text).toContain('課程管理 Course');
+    expect(text).toContain('合作夥伴 Partner');
+
+    const links: HTMLAnchorElement[] = Array.from(
+      fixture.nativeElement.querySelectorAll('a.app-nav-item'),
+    );
+    expect(links.map((link) => link.getAttribute('href'))).toContain('/partners');
+  });
+
   it('links the AppRole menu entry to /app-roles', () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
@@ -77,7 +91,7 @@ describe('App shell', () => {
     expect(shell().classList).not.toContain('app-shell--collapsed');
   });
 
-  it('collapses a nav group, hiding its items', () => {
+  it('collapses a nav group, hiding only that group items', () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
 
@@ -89,6 +103,9 @@ describe('App shell', () => {
     groupHeader.click();
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.querySelectorAll('a.app-nav-item').length).toBe(0);
+    // Only the first group folds away; any later group keeps its entries on screen.
+    expect(fixture.nativeElement.querySelectorAll('a.app-nav-item').length).toBe(
+      navItemCount - NAV_GROUPS[0].items.length,
+    );
   });
 });

@@ -22,7 +22,11 @@ public class LookupsControllerTests
             .Seed(2, "已發布", isDraft: false, isPublished: true, isDiscontinued: false)
             .Seed(1, "草稿", isDraft: true, isPublished: false, isDiscontinued: false);
 
-        return new LookupsController(users, roles, publishStatuses);
+        var partners = new InMemoryPartnerRepository()
+            .Seed(1, "微軟", "MS", "Microsoft 微軟課程", "微軟", 20, "ms-logo.png")
+            .Seed(2, "思科", "CISCO", "Cisco 思科課程", "思科", 10, "cisco.png");
+
+        return new LookupsController(users, roles, publishStatuses, partners);
     }
 
     [Fact]
@@ -68,5 +72,17 @@ public class LookupsControllerTests
 
         Assert.Equal(new byte[] { 1, 2 }, statuses.Select(s => s.Pkid));
         Assert.Equal(new[] { "草稿", "已發布" }, statuses.Select(s => s.Description));
+    }
+
+    [Fact]
+    public async Task GetPartners_ReturnsPartnersSortedByDisplayOrder()
+    {
+        var result = await Controller().GetPartners(CancellationToken.None);
+
+        var partners = Assert.IsAssignableFrom<IEnumerable<Partner>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value).ToList();
+
+        Assert.Equal(new short[] { 2, 1 }, partners.Select(p => p.Pkid));
+        Assert.Equal(new[] { "思科", "微軟" }, partners.Select(p => p.Name));
     }
 }

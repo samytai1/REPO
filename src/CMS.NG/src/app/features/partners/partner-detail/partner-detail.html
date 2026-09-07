@@ -1,0 +1,53 @@
+<div class="page-header page-card">
+  <h1 class="page-header__title">檢視合作夥伴</h1>
+
+  <div class="page-header__actions">
+    <p-button label="返回" icon="pi pi-arrow-left" severity="secondary" (onClick)="back()" />
+    @if (partner(); as current) {
+      <p-button label="編輯" icon="pi pi-pencil" severity="success" (onClick)="edit()" />
+    }
+  </div>
+</div>
+
+@if (loading()) {
+  <div class="page-card partner-detail__section">
+    <span class="empty-text">載入中…</span>
+  </div>
+} @else if (partner(); as current) {
+  <div class="page-card partner-detail__section">
+    <h2 class="form-section__title">合作夥伴資料</h2>
+
+    <dl class="detail-grid">
+      <dt>主代碼</dt>
+      <dd>{{ current.pkid }}</dd>
+
+      <dt>名稱</dt>
+      <dd>{{ current.name }}</dd>
+
+      <dt>應用代碼</dt>
+      <dd>{{ current.appKey }}</dd>
+
+      <dt>選單顯示名稱</dt>
+      <dd>{{ current.nameOnPartnerMenu }}</dd>
+
+      <dt>課程明細頁名稱</dt>
+      <dd>{{ current.nameOnCourseDetailPage }}</dd>
+
+      <dt>顯示順序</dt>
+      <dd>{{ current.displayOrder }}</dd>
+
+      <dt>圖片檔名</dt>
+      <dd>
+        @if (current.imageFilename) {
+          {{ current.imageFilename }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+    </dl>
+  </div>
+} @else {
+  <div class="page-card partner-detail__section">
+    <span class="empty-text">查無資料</span>
+  </div>
+}

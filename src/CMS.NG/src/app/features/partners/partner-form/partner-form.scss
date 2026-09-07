@@ -1,0 +1,9 @@
+.partner-form {
+  &__section {
+    margin-top: 0.75rem;
+  }
+}
+
+:host ::ng-deep .w-full {
+  width: 100%;
+}

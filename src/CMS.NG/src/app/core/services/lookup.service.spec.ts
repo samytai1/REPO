@@ -3,7 +3,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { environment } from '@environments/environment';
 
-import { AppUserLookup, PublishStatus } from '@core/models';
+import { AppUserLookup, Partner, PublishStatus } from '@core/models';
 import { LookupService } from './lookup.service';
 
 describe('LookupService', () => {
@@ -48,5 +48,37 @@ describe('LookupService', () => {
     req.flush(statuses);
 
     expect(result).toEqual(statuses);
+  });
+
+  it('getPartners() issues GET /api/lookups/partners', () => {
+    const partners: Partner[] = [
+      {
+        pkid: 2,
+        name: '思科',
+        appKey: 'CISCO',
+        nameOnPartnerMenu: 'Cisco 思科課程',
+        nameOnCourseDetailPage: '思科',
+        displayOrder: 10,
+        imageFilename: 'cisco.png',
+      },
+      {
+        pkid: 1,
+        name: '微軟',
+        appKey: 'MS',
+        nameOnPartnerMenu: 'Microsoft 微軟課程',
+        nameOnCourseDetailPage: '微軟',
+        displayOrder: 20,
+        imageFilename: null,
+      },
+    ];
+
+    let result: Partner[] | undefined;
+    service.getPartners().subscribe((value) => (result = value));
+
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/lookups/partners`);
+    expect(req.request.method).toBe('GET');
+    req.flush(partners);
+
+    expect(result).toEqual(partners);
   });
 });

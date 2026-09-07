@@ -1,0 +1,131 @@
+<form [formGroup]="form" (ngSubmit)="save()">
+  <div class="page-header page-card">
+    <h1 class="page-header__title">{{ isEditMode ? '編輯合作夥伴' : '新增合作夥伴' }}</h1>
+
+    <div class="page-header__actions">
+      <p-button
+        label="取消"
+        icon="pi pi-times"
+        severity="secondary"
+        type="button"
+        (onClick)="cancel()"
+      />
+      <p-button
+        label="儲存"
+        icon="pi pi-check"
+        severity="success"
+        type="submit"
+        [loading]="saving()"
+      />
+    </div>
+  </div>
+
+  <div class="page-card partner-form__section">
+    <h2 class="form-section__title">合作夥伴資料</h2>
+
+    @if (isEditMode) {
+      <div class="form-field">
+        <label for="pkid">主代碼</label>
+        <p-inputnumber
+          inputId="pkid"
+          formControlName="pkid"
+          [showButtons]="false"
+          styleClass="w-full"
+        />
+      </div>
+    }
+
+    <div class="form-field">
+      <label for="name">名稱 <span class="required">*</span></label>
+      <input
+        id="name"
+        pInputText
+        type="text"
+        formControlName="name"
+        placeholder="請輸入名稱"
+        maxlength="50"
+      />
+      @if (isInvalid('name')) {
+        <div class="field-error">名稱為必填，且不可超過 50 字。</div>
+      }
+    </div>
+
+    <div class="form-field">
+      <label for="appKey">應用代碼 <span class="required">*</span></label>
+      <input
+        id="appKey"
+        pInputText
+        type="text"
+        formControlName="appKey"
+        placeholder="請輸入應用代碼"
+        maxlength="10"
+      />
+      @if (isInvalid('appKey')) {
+        <div class="field-error">應用代碼為必填，且不可超過 10 字。</div>
+      }
+    </div>
+
+    <div class="form-field">
+      <label for="nameOnPartnerMenu">選單顯示名稱 <span class="required">*</span></label>
+      <input
+        id="nameOnPartnerMenu"
+        pInputText
+        type="text"
+        formControlName="nameOnPartnerMenu"
+        placeholder="請輸入選單顯示名稱"
+        maxlength="200"
+      />
+      @if (isInvalid('nameOnPartnerMenu')) {
+        <div class="field-error">選單顯示名稱為必填，且不可超過 200 字。</div>
+      }
+    </div>
+
+    <div class="form-field">
+      <label for="nameOnCourseDetailPage">課程明細頁名稱 <span class="required">*</span></label>
+      <input
+        id="nameOnCourseDetailPage"
+        pInputText
+        type="text"
+        formControlName="nameOnCourseDetailPage"
+        placeholder="請輸入課程明細頁名稱"
+        maxlength="50"
+      />
+      @if (isInvalid('nameOnCourseDetailPage')) {
+        <div class="field-error">課程明細頁名稱為必填，且不可超過 50 字。</div>
+      }
+    </div>
+  </div>
+
+  <div class="page-card partner-form__section">
+    <h2 class="form-section__title">顯示設定</h2>
+
+    <div class="form-field">
+      <label for="displayOrder">顯示順序 <span class="required">*</span></label>
+      <p-inputnumber
+        inputId="displayOrder"
+        formControlName="displayOrder"
+        [min]="0"
+        [showButtons]="false"
+        styleClass="w-full"
+      />
+      @if (isInvalid('displayOrder')) {
+        <div class="field-error">請輸入 0 以上的顯示順序。</div>
+      }
+    </div>
+
+    <div class="form-field">
+      <label for="imageFilename">圖片檔名</label>
+      <input
+        id="imageFilename"
+        pInputText
+        type="text"
+        formControlName="imageFilename"
+        placeholder="例如 partner-logo.png（可留空）"
+        maxlength="50"
+      />
+      @if (isInvalid('imageFilename')) {
+        <div class="field-error">圖片檔名不可超過 50 字。</div>
+      }
+    </div>
+  </div>
+</form>

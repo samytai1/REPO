@@ -26,4 +26,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: '發布狀態 PublishStatus', icon: 'pi pi-flag', route: '/publish-statuses' },
     ],
   },
+  {
+    label: '課程管理 Course',
+    icon: 'pi pi-book',
+    items: [{ label: '合作夥伴 Partner', icon: 'pi pi-briefcase', route: '/partners' }],
+  },
 ];
