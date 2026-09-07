@@ -1,0 +1,21 @@
+.app-role-list {
+  &__table {
+    margin-top: 0.75rem;
+  }
+
+  &__numeric {
+    text-align: right;
+  }
+
+  &__actions {
+    display: flex;
+    gap: 0.15rem;
+  }
+
+  &__drawer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+  }
+}

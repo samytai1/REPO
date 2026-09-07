@@ -1,0 +1,11 @@
+.app-role-detail {
+  &__section {
+    margin-top: 0.75rem;
+  }
+
+  &__users {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+}

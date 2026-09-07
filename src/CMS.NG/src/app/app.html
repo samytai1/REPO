@@ -1,0 +1,55 @@
+<div class="app-shell" [class.app-shell--collapsed]="collapsed()">
+  <aside class="app-sidebar">
+    <div class="app-sidebar__brand">
+      <span class="app-sidebar__brand-text">{{ brand }}</span>
+      <button
+        type="button"
+        class="app-sidebar__toggle"
+        [attr.aria-label]="collapsed() ? '展開選單' : '收合選單'"
+        (click)="toggleSidebar()"
+      >
+        <i class="pi" [class.pi-angle-left]="!collapsed()" [class.pi-angle-right]="collapsed()"></i>
+      </button>
+    </div>
+
+    <nav class="app-sidebar__nav">
+      @for (group of navGroups; track group.label) {
+        <div class="app-nav-group">
+          <button type="button" class="app-nav-group__header" (click)="toggleGroup(group)">
+            <i class="app-nav-group__icon" [class]="group.icon"></i>
+            <span class="app-nav-group__label">{{ group.label }}</span>
+            <i
+              class="app-nav-group__chevron pi"
+              [class.pi-angle-down]="isExpanded(group)"
+              [class.pi-angle-right]="!isExpanded(group)"
+            ></i>
+          </button>
+
+          @if (isExpanded(group)) {
+            <ul class="app-nav-group__items">
+              @for (item of group.items; track item.route) {
+                <li>
+                  <a
+                    class="app-nav-item"
+                    [routerLink]="item.route"
+                    routerLinkActive="app-nav-item--active"
+                  >
+                    <i class="app-nav-item__icon" [class]="item.icon"></i>
+                    <span class="app-nav-item__label">{{ item.label }}</span>
+                  </a>
+                </li>
+              }
+            </ul>
+          }
+        </div>
+      }
+    </nav>
+  </aside>
+
+  <main class="app-content">
+    <router-outlet />
+  </main>
+</div>
+
+<p-toast position="top-right" />
+<p-confirmDialog />

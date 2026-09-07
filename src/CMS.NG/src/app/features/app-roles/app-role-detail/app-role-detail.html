@@ -1,0 +1,64 @@
+<div class="page-header page-card">
+  <h1 class="page-header__title">檢視角色</h1>
+
+  <div class="page-header__actions">
+    <p-button label="返回" icon="pi pi-arrow-left" severity="secondary" (onClick)="back()" />
+    @if (role(); as current) {
+      <p-button label="編輯" icon="pi pi-pencil" severity="success" (onClick)="edit()" />
+    }
+  </div>
+</div>
+
+@if (loading()) {
+  <div class="page-card app-role-detail__section">
+    <span class="empty-text">載入中…</span>
+  </div>
+} @else if (role(); as current) {
+  <div class="page-card app-role-detail__section">
+    <h2 class="form-section__title">角色資料</h2>
+
+    <dl class="detail-grid">
+      <dt>主代碼</dt>
+      <dd>{{ current.pkid }}</dd>
+
+      <dt>角色代碼</dt>
+      <dd>{{ current.roleId }}</dd>
+
+      <dt>角色名稱</dt>
+      <dd>{{ current.roleName }}</dd>
+
+      <dt>權限等級</dt>
+      <dd>{{ current.permissionLevel }}</dd>
+
+      <dt>描述</dt>
+      <dd>
+        @if (current.description) {
+          {{ current.description }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+    </dl>
+  </div>
+
+  <div class="page-card app-role-detail__section">
+    <h2 class="form-section__title">使用者（{{ current.userCount }}）</h2>
+
+    @if (current.users.length) {
+      <div class="app-role-detail__users">
+        @for (user of current.users; track user.userId) {
+          <p-tag
+            [value]="user.userName + ' (' + user.userId + ')'"
+            [severity]="user.isActive ? 'success' : 'secondary'"
+          />
+        }
+      </div>
+    } @else {
+      <span class="empty-text">尚無使用者</span>
+    }
+  </div>
+} @else {
+  <div class="page-card app-role-detail__section">
+    <span class="empty-text">查無資料</span>
+  </div>
+}

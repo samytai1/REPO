@@ -1,0 +1,131 @@
+/* Global styles. PrimeNG is layered after `base` — see the cssLayer config in app.config.ts. */
+@layer theme, base, primeng;
+
+:root {
+  --app-sidebar-width: 15rem;
+  --app-sidebar-width-collapsed: 4.25rem;
+  --app-sidebar-bg: #111c2e;
+  --app-sidebar-fg: #e2e8f0;
+  --app-sidebar-muted: #94a3b8;
+  --app-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --app-sidebar-active: rgba(255, 255, 255, 0.1);
+  --app-sidebar-border: rgba(255, 255, 255, 0.08);
+  --app-content-bg: #f4f6fa;
+  --app-accent: #10b981;
+  --app-heading: #1e293b;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family:
+    'Segoe UI', 'Noto Sans TC', 'Microsoft JhengHei', system-ui, -apple-system, sans-serif;
+  color: var(--app-heading);
+  background: var(--app-content-bg);
+}
+
+/* ---- Shared page chrome, mirrored by every feature page ---- */
+
+.page-card {
+  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 8%);
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+
+  &__title {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+  }
+
+  &__subtitle {
+    color: #94a3b8;
+    font-size: 0.875rem;
+  }
+
+  &__actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-left: auto;
+  }
+}
+
+.form-section {
+  margin-bottom: 1rem;
+
+  &__title {
+    margin: 0 0 0.85rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+  }
+}
+
+.form-field {
+  margin-bottom: 0.9rem;
+
+  label {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  .required {
+    margin-left: 0.15rem;
+    color: #ef4444;
+  }
+
+  input,
+  textarea {
+    width: 100%;
+  }
+}
+
+.field-error {
+  margin-top: 0.25rem;
+  color: #ef4444;
+  font-size: 0.75rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: 0.65rem 1rem;
+
+  dt {
+    color: #64748b;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  dd {
+    margin: 0;
+    font-size: 0.9rem;
+  }
+}
+
+.empty-text {
+  color: #94a3b8;
+}
+
+/* n-n multiselect: let the selected chips wrap instead of clipping. */
+.wrap-chips {
+  ::ng-deep .p-multiselect-label {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    white-space: normal;
+  }
+}

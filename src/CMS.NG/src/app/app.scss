@@ -1,0 +1,137 @@
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--app-sidebar-width) 1fr;
+  min-height: 100vh;
+  transition: grid-template-columns 0.2s ease;
+
+  &--collapsed {
+    grid-template-columns: var(--app-sidebar-width-collapsed) 1fr;
+
+    .app-sidebar__brand-text,
+    .app-nav-group__label,
+    .app-nav-group__chevron,
+    .app-nav-item__label {
+      display: none;
+    }
+
+    .app-nav-group__header,
+    .app-nav-item {
+      justify-content: center;
+    }
+  }
+}
+
+.app-sidebar {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--app-sidebar-bg);
+  color: var(--app-sidebar-fg);
+
+  &__brand {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 1.15rem 1.25rem;
+    border-bottom: 1px solid var(--app-sidebar-border);
+  }
+
+  &__brand-text {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  &__toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--app-sidebar-hover);
+    }
+  }
+
+  &__nav {
+    padding: 0.75rem 0;
+  }
+}
+
+.app-nav-group {
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.7rem 1.25rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 0.9rem;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--app-sidebar-hover);
+    }
+  }
+
+  &__icon {
+    font-size: 1rem;
+    opacity: 0.85;
+  }
+
+  &__label {
+    flex: 1;
+  }
+
+  &__chevron {
+    font-size: 0.75rem;
+    opacity: 0.7;
+  }
+
+  &__items {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+}
+
+.app-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 1.25rem 0.65rem 2.1rem;
+  color: var(--app-sidebar-muted);
+  font-size: 0.875rem;
+  text-decoration: none;
+
+  &:hover {
+    background: var(--app-sidebar-hover);
+    color: var(--app-sidebar-fg);
+  }
+
+  &--active {
+    background: var(--app-sidebar-active);
+    color: #fff;
+    box-shadow: inset 3px 0 0 var(--app-accent);
+  }
+
+  &__icon {
+    font-size: 0.95rem;
+  }
+}
+
+.app-content {
+  min-width: 0;
+  padding: 1.25rem;
+  background: var(--app-content-bg);
+}
