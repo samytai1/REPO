@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace CMS.API.Tests;
 
-/// <summary>Covers the lookup lists the AppRole form and filter drawer depend on.</summary>
+/// <summary>Covers the lookup lists the feature forms and filter drawers depend on.</summary>
 public class LookupsControllerTests
 {
     private static LookupsController Controller()
@@ -18,7 +18,11 @@ public class LookupsControllerTests
             .Seed("User", "User", 100, "一般使用者")
             .Seed("Admin", "Administrator", 1, "系統管理員");
 
-        return new LookupsController(users, roles);
+        var publishStatuses = new InMemoryPublishStatusRepository()
+            .Seed(2, "已發布", isDraft: false, isPublished: true, isDiscontinued: false)
+            .Seed(1, "草稿", isDraft: true, isPublished: false, isDiscontinued: false);
+
+        return new LookupsController(users, roles, publishStatuses);
     }
 
     [Fact]
@@ -52,5 +56,17 @@ public class LookupsControllerTests
             Assert.IsType<OkObjectResult>(result.Result).Value).ToList();
 
         Assert.Equal(new[] { "Admin", "User" }, roles.Select(r => r.RoleId));
+    }
+
+    [Fact]
+    public async Task GetPublishStatuses_ReturnsStatusesSortedByPkid()
+    {
+        var result = await Controller().GetPublishStatuses(CancellationToken.None);
+
+        var statuses = Assert.IsAssignableFrom<IEnumerable<PublishStatus>>(
+            Assert.IsType<OkObjectResult>(result.Result).Value).ToList();
+
+        Assert.Equal(new byte[] { 1, 2 }, statuses.Select(s => s.Pkid));
+        Assert.Equal(new[] { "草稿", "已發布" }, statuses.Select(s => s.Description));
     }
 }

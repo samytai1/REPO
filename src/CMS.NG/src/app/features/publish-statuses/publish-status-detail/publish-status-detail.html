@@ -1,0 +1,56 @@
+<div class="page-header page-card">
+  <h1 class="page-header__title">檢視發布狀態</h1>
+
+  <div class="page-header__actions">
+    <p-button label="返回" icon="pi pi-arrow-left" severity="secondary" (onClick)="back()" />
+    @if (status(); as current) {
+      <p-button label="編輯" icon="pi pi-pencil" severity="success" (onClick)="edit()" />
+    }
+  </div>
+</div>
+
+@if (loading()) {
+  <div class="page-card publish-status-detail__section">
+    <span class="empty-text">載入中…</span>
+  </div>
+} @else if (status(); as current) {
+  <div class="page-card publish-status-detail__section">
+    <h2 class="form-section__title">發布狀態資料</h2>
+
+    <dl class="detail-grid">
+      <dt>主代碼</dt>
+      <dd>{{ current.pkid }}</dd>
+
+      <dt>狀態說明</dt>
+      <dd>{{ current.description }}</dd>
+
+      <dt>草稿</dt>
+      <dd>
+        <p-tag
+          [value]="current.isDraft ? '是' : '否'"
+          [severity]="current.isDraft ? 'success' : 'secondary'"
+        />
+      </dd>
+
+      <dt>已發布</dt>
+      <dd>
+        <p-tag
+          [value]="current.isPublished ? '是' : '否'"
+          [severity]="current.isPublished ? 'success' : 'secondary'"
+        />
+      </dd>
+
+      <dt>已下架</dt>
+      <dd>
+        <p-tag
+          [value]="current.isDiscontinued ? '是' : '否'"
+          [severity]="current.isDiscontinued ? 'success' : 'secondary'"
+        />
+      </dd>
+    </dl>
+  </div>
+} @else {
+  <div class="page-card publish-status-detail__section">
+    <span class="empty-text">查無資料</span>
+  </div>
+}

@@ -7,5 +7,10 @@ export const routes: Routes = [
     loadChildren: () =>
       import('@features/app-roles/app-roles.routes').then((m) => m.appRoleRoutes),
   },
+  {
+    path: 'publish-statuses',
+    loadChildren: () =>
+      import('@features/publish-statuses/publish-statuses.routes').then((m) => m.publishStatusRoutes),
+  },
   { path: '**', redirectTo: 'app-roles' },
 ];

@@ -3,9 +3,14 @@ import { provideRouter } from '@angular/router';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { ConfirmationService, MessageService } from 'primeng/api';
 
+import { NAV_GROUPS } from '@shared/layout/nav-menu';
+
 import { App } from './app';
 
 describe('App shell', () => {
+  /** Every item across every group — the shell renders them all with the groups expanded. */
+  const navItemCount = NAV_GROUPS.reduce((total, group) => total + group.items.length, 0);
+
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [App],
@@ -25,13 +30,25 @@ describe('App shell', () => {
     expect(fixture.componentInstance).toBeTruthy();
   });
 
-  it('renders the 系統管理 Admin group with the 角色 AppRole entry', () => {
+  it('renders the 系統管理 Admin group with its feature entries', () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
 
     const text: string = fixture.nativeElement.textContent;
     expect(text).toContain('系統管理 Admin');
     expect(text).toContain('角色 AppRole');
+    expect(text).toContain('發布狀態 PublishStatus');
+  });
+
+  it('links the PublishStatus menu entry to /publish-statuses', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+
+    const links: HTMLAnchorElement[] = Array.from(
+      fixture.nativeElement.querySelectorAll('a.app-nav-item'),
+    );
+
+    expect(links.map((link) => link.getAttribute('href'))).toContain('/publish-statuses');
   });
 
   it('links the AppRole menu entry to /app-roles', () => {
@@ -67,7 +84,7 @@ describe('App shell', () => {
     const groupHeader: HTMLButtonElement =
       fixture.nativeElement.querySelector('.app-nav-group__header');
 
-    expect(fixture.nativeElement.querySelectorAll('a.app-nav-item').length).toBe(1);
+    expect(fixture.nativeElement.querySelectorAll('a.app-nav-item').length).toBe(navItemCount);
 
     groupHeader.click();
     fixture.detectChanges();

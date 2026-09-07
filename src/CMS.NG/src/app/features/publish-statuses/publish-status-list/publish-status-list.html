@@ -1,0 +1,196 @@
+<div class="page-header page-card">
+  <h1 class="page-header__title">發布狀態 PublishStatus</h1>
+  <span class="page-header__subtitle">內容的發布生命週期狀態</span>
+
+  <div class="page-header__actions">
+    <p-button
+      label="搜尋條件"
+      icon="pi pi-filter"
+      severity="secondary"
+      [badge]="hasActiveFilters ? '1' : undefined"
+      (onClick)="openDrawer()"
+    />
+    <p-button label="新增" icon="pi pi-plus" severity="success" (onClick)="add()" />
+  </div>
+</div>
+
+<div class="page-card publish-status-list__table">
+  <p-table
+    [value]="statuses()"
+    [loading]="loading()"
+    [paginator]="true"
+    [rows]="page.rows"
+    [first]="page.first"
+    [rowsPerPageOptions]="rowsPerPageOptions"
+    [sortField]="sort.field"
+    [sortOrder]="sort.order"
+    [showCurrentPageReport]="true"
+    currentPageReportTemplate="{first}–{last} 筆，共 {totalRecords} 筆"
+    paginatorPosition="top"
+    dataKey="pkid"
+    (onLazyLoad)="onStateChange($event)"
+    (onPage)="onStateChange($event)"
+    (onSort)="onStateChange($event)"
+  >
+    <ng-template #header>
+      <tr>
+        <th pSortableColumn="pkid" style="width: 7rem">主代碼 <p-sortIcon field="pkid" /></th>
+        <th pSortableColumn="description">狀態說明 <p-sortIcon field="description" /></th>
+        <th pSortableColumn="isDraft" style="width: 7rem">草稿 <p-sortIcon field="isDraft" /></th>
+        <th pSortableColumn="isPublished" style="width: 8rem">
+          已發布 <p-sortIcon field="isPublished" />
+        </th>
+        <th pSortableColumn="isDiscontinued" style="width: 8rem">
+          已下架 <p-sortIcon field="isDiscontinued" />
+        </th>
+        <th style="width: 9rem">操作</th>
+      </tr>
+    </ng-template>
+
+    <ng-template #body let-status>
+      <tr>
+        <td class="publish-status-list__numeric">{{ status.pkid }}</td>
+        <td>{{ status.description }}</td>
+        <td>
+          <p-tag
+            [value]="status.isDraft ? '是' : '否'"
+            [severity]="status.isDraft ? 'success' : 'secondary'"
+          />
+        </td>
+        <td>
+          <p-tag
+            [value]="status.isPublished ? '是' : '否'"
+            [severity]="status.isPublished ? 'success' : 'secondary'"
+          />
+        </td>
+        <td>
+          <p-tag
+            [value]="status.isDiscontinued ? '是' : '否'"
+            [severity]="status.isDiscontinued ? 'success' : 'secondary'"
+          />
+        </td>
+        <td>
+          <div class="publish-status-list__actions">
+            <p-button
+              icon="pi pi-eye"
+              severity="secondary"
+              [text]="true"
+              pTooltip="檢視"
+              ariaLabel="檢視"
+              (onClick)="view(status)"
+            />
+            <p-button
+              icon="pi pi-pencil"
+              severity="info"
+              [text]="true"
+              pTooltip="編輯"
+              ariaLabel="編輯"
+              (onClick)="edit(status)"
+            />
+            <p-button
+              icon="pi pi-trash"
+              severity="danger"
+              [text]="true"
+              pTooltip="刪除"
+              ariaLabel="刪除"
+              (onClick)="confirmDelete(status)"
+            />
+          </div>
+        </td>
+      </tr>
+    </ng-template>
+
+    <ng-template #emptymessage>
+      <tr>
+        <td colspan="6" class="empty-text">查無資料</td>
+      </tr>
+    </ng-template>
+  </p-table>
+</div>
+
+<p-drawer
+  [(visible)]="drawerVisible"
+  header="搜尋條件"
+  position="right"
+  styleClass="publish-status-list__drawer"
+>
+  <div class="form-field">
+    <label for="filter-keyword">關鍵字</label>
+    <input
+      id="filter-keyword"
+      pInputText
+      type="text"
+      placeholder="狀態說明"
+      [(ngModel)]="draftFilters.keyword"
+      (keyup.enter)="applyFilters()"
+    />
+  </div>
+
+  <div class="form-field">
+    <label for="filter-pkid-from">主代碼（起）</label>
+    <p-inputnumber
+      inputId="filter-pkid-from"
+      [(ngModel)]="draftFilters.pkidFrom"
+      [min]="0"
+      [max]="255"
+      [showButtons]="false"
+      styleClass="w-full"
+    />
+  </div>
+
+  <div class="form-field">
+    <label for="filter-pkid-to">主代碼（迄）</label>
+    <p-inputnumber
+      inputId="filter-pkid-to"
+      [(ngModel)]="draftFilters.pkidTo"
+      [min]="0"
+      [max]="255"
+      [showButtons]="false"
+      styleClass="w-full"
+    />
+  </div>
+
+  <div class="form-field">
+    <label for="filter-is-draft">草稿</label>
+    <p-select
+      inputId="filter-is-draft"
+      [(ngModel)]="draftFilters.isDraft"
+      [options]="boolOptions"
+      optionLabel="label"
+      optionValue="value"
+      appendTo="body"
+      styleClass="w-full"
+    />
+  </div>
+
+  <div class="form-field">
+    <label for="filter-is-published">已發布</label>
+    <p-select
+      inputId="filter-is-published"
+      [(ngModel)]="draftFilters.isPublished"
+      [options]="boolOptions"
+      optionLabel="label"
+      optionValue="value"
+      appendTo="body"
+      styleClass="w-full"
+    />
+  </div>
+
+  <div class="form-field">
+    <label for="filter-is-discontinued">已下架</label>
+    <p-select
+      inputId="filter-is-discontinued"
+      [(ngModel)]="draftFilters.isDiscontinued"
+      [options]="boolOptions"
+      optionLabel="label"
+      optionValue="value"
+      appendTo="body"
+      styleClass="w-full"
+    />
+  </div>
+
+  <div class="publish-status-list__drawer-actions">
+    <p-button label="清除" icon="pi pi-times" severity="secondary" (onClick)="resetFilters()" />
+    <p-button label="套用" icon="pi pi-check" severity="success" (onClick)="applyFilters()" />
+  </div>
+</p-drawer>

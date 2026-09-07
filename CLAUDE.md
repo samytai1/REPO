@@ -101,7 +101,7 @@ Karma needs a browser: `$env:CHROME_BIN = "C:\Program Files\Google\Chrome\Applic
 
 **Service rules** — `core\services\app-role.service.ts` is the template: single-record routes wrap the id in `encodeURIComponent`; `update()` PUTs to the collection route with the key in the body.
 
-**Sidebar** — add the entry to `NAV_GROUPS` in `src\app\shared\layout\nav-menu.ts`. That is the only place the menu is defined; `app.html` renders it. Current entry: `系統管理 Admin` → `角色 AppRole` → `/app-roles`.
+**Sidebar** — add the entry to `NAV_GROUPS` in `src\app\shared\layout\nav-menu.ts`. That is the only place the menu is defined; `app.html` renders it. Current entries: `系統管理 Admin` → `角色 AppRole` → `/app-roles`, `發布狀態 PublishStatus` → `/publish-statuses`.
 
 **Routing** — the root router lazy-loads each feature's `{table-plural}.routes.ts`. Order matters: `new` and `:id/edit` must precede `:id`.
 
@@ -111,9 +111,9 @@ Karma needs a browser: `$env:CHROME_BIN = "C:\Program Files\Google\Chrome\Applic
 
 ## Testing
 
-**Backend** (`src\CMS.API.Tests`, 32 tests) — controller tests against hand-written in-memory fakes in `Fakes\`; no mocking library. A fake must mirror its SQL repository's semantics (sort order, filter breadth, n-n replace) so the tests stay meaningful. `AppRolesRoutingConventionTests` pins the route shape via reflection, so a controller that drifts from the convention fails the build rather than the frontend.
+**Backend** (`src\CMS.API.Tests`, 61 tests) — controller tests against hand-written in-memory fakes in `Fakes\`; no mocking library. A fake must mirror its SQL repository's semantics (sort order, filter breadth, n-n replace) so the tests stay meaningful. `AppRolesRoutingConventionTests` pins the route shape via reflection, so a controller that drifts from the convention fails the build rather than the frontend.
 
-**Frontend** (`src\CMS.NG`, 50 tests) — default Karma + Jasmine. Services use `provideHttpClientTesting` with `httpMock.verify()` in `afterEach`. Components are tested through their real templates with `provideNoopAnimations()`; protected members are reached via a locally declared `…Internals` type alias rather than `as any`.
+**Frontend** (`src\CMS.NG`, 96 tests) — default Karma + Jasmine. Services use `provideHttpClientTesting` with `httpMock.verify()` in `afterEach`. Components are tested through their real templates with `provideNoopAnimations()`; protected members are reached via a locally declared `…Internals` type alias rather than `as any`.
 
 Gotchas that already bit once:
 - Every spec must contain a real `expect(...)` — `httpMock.expectNone(...)` alone logs "has no expectations".
