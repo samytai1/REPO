@@ -45,6 +45,18 @@ type ListInternals = {
   edit(course: Course): void;
   add(): void;
   confirmDelete(course: Course): void;
+  // In-place editing. `field` is widened to string here so the spec can also probe the
+  // read-only columns, which the EditableField union deliberately excludes.
+  editingCell: () => { pkid: number; field: string; original: unknown } | null;
+  editValue: unknown;
+  editError: () => string | null;
+  savingCell: () => boolean;
+  publishStatusEditOptions: { label: string; value: number }[];
+  isEditable(field: string): boolean;
+  isEditing(course: Course, field: string): boolean;
+  startEdit(course: Course, field: string): void;
+  commitEdit(): void;
+  cancelEdit(): void;
 };
 
 describe('CourseList', () => {
@@ -481,5 +493,369 @@ describe('CourseList', () => {
 
     httpMock.expectNone(`${environment.apiBaseUrl}/courses/1`);
     expect(component.courses().length).toBe(2);
+  });
+
+  describe('in-place editing', () => {
+    const coursesUrl = `${environment.apiBaseUrl}/courses`;
+    const azureUrl = `${coursesUrl}/1`;
+
+    /** What GET /api/courses/1 returns: the list row plus the two n-n collections. */
+    const azureFull: Course = {
+      ...azure,
+      jobCategories: [{ pkid: 5, description: '雲端工程師' }],
+      certifications: [{ pkid: 7, title: 'AZ-104', partnerPkid: 1 }],
+    };
+
+    /** The first rendered row is `azure`; every spec here loads it alone. */
+    function cell(field: string): HTMLElement {
+      return fixture.nativeElement.querySelector(
+        `tbody tr:first-child td[data-field="${field}"]`,
+      ) as HTMLElement;
+    }
+
+    function dispatchOn(field: string, type: 'click' | 'dblclick'): HTMLElement {
+      const td = cell(field);
+      td.dispatchEvent(new MouseEvent(type, { bubbles: true }));
+      fixture.detectChanges();
+      return td;
+    }
+
+    /** Opens an editor through the component, the way a double-click does. */
+    function openEditor(field: string, value: unknown): void {
+      component.startEdit(azure, field);
+      component.editValue = value;
+      fixture.detectChanges();
+    }
+
+    /** Answers the re-read + PUT that a committed cell fires, and returns the PUT body. */
+    function flushSave(saved: Course = azureFull): Record<string, unknown> {
+      const read = httpMock.expectOne(azureUrl);
+      expect(read.request.method).toBe('GET');
+      read.flush(azureFull);
+
+      const put = httpMock.expectOne(coursesUrl);
+      expect(put.request.method).toBe('PUT');
+
+      const body = put.request.body as Record<string, unknown>;
+      put.flush(saved);
+      fixture.detectChanges();
+
+      return body;
+    }
+
+    it('opens a cell editor on double-click', () => {
+      flushInitialLoad([azure]);
+
+      dispatchOn('title', 'dblclick');
+
+      expect(component.editingCell()).toEqual(
+        jasmine.objectContaining({ pkid: 1, field: 'title' }),
+      );
+      expect(cell('title').querySelector('input')).not.toBeNull();
+    });
+
+    it('does not start editing on a single click', () => {
+      flushInitialLoad([azure]);
+
+      dispatchOn('title', 'click');
+
+      expect(component.editingCell()).toBeNull();
+      expect(cell('title').querySelector('input')).toBeNull();
+      expect(cell('title').textContent?.trim()).toBe('Azure 基礎架構');
+    });
+
+    it('leaves 主代碼, 原廠 and 課程群組 read-only', () => {
+      flushInitialLoad([azure]);
+
+      for (const field of ['pkid', 'partner', 'courseGroup']) {
+        dispatchOn(field, 'dblclick');
+
+        expect(component.editingCell()).withContext(field).toBeNull();
+        expect(cell(field).querySelector('input')).withContext(field).toBeNull();
+      }
+
+      expect(component.isEditable('pkid')).toBeFalse();
+      expect(component.isEditable('partner')).toBeFalse();
+      expect(component.isEditable('courseGroup')).toBeFalse();
+    });
+
+    it('refuses to open an editor for a read-only field even when asked directly', () => {
+      flushInitialLoad([azure]);
+
+      component.startEdit(azure, 'pkid');
+      component.startEdit(azure, 'partner');
+
+      expect(component.editingCell()).toBeNull();
+    });
+
+    it('opens the matching widget per column', () => {
+      flushInitialLoad([azure]);
+
+      dispatchOn('hour', 'dblclick');
+      expect(cell('hour').querySelector('p-inputnumber')).not.toBeNull();
+
+      dispatchOn('publishStatusPkid', 'dblclick');
+      expect(cell('publishStatusPkid').querySelector('p-select')).not.toBeNull();
+
+      dispatchOn('scheduleOn', 'dblclick');
+      expect(cell('scheduleOn').querySelector('p-datepicker')).not.toBeNull();
+
+      dispatchOn('canRepeat', 'dblclick');
+      expect(cell('canRepeat').querySelector('p-checkbox')).not.toBeNull();
+
+      component.cancelEdit();
+      fixture.detectChanges();
+    });
+
+    it('offers 上架狀態 without a 不限 entry — the column is required', () => {
+      flushInitialLoad([azure]);
+
+      expect(component.publishStatusEditOptions.map((o) => o.label)).toEqual(['草稿', '已發布']);
+    });
+
+    it('persists through GET then PUT /api/courses when the editor loses focus', () => {
+      flushInitialLoad([azure]);
+
+      dispatchOn('title', 'dblclick');
+      const input = cell('title').querySelector('input') as HTMLInputElement;
+      input.value = '  Azure 進階架構  ';
+      input.dispatchEvent(new Event('input'));
+      fixture.detectChanges();
+
+      input.dispatchEvent(new Event('blur'));
+      fixture.detectChanges();
+
+      const body = flushSave({ ...azureFull, title: 'Azure 進階架構' });
+
+      expect(body['pkid']).toBe(1);
+      expect(body['title']).toBe('Azure 進階架構');
+      expect(component.editingCell()).toBeNull();
+      expect(component.courses()[0].title).toBe('Azure 進階架構');
+      expect(cell('title').textContent?.trim()).toBe('Azure 進階架構');
+    });
+
+    it('re-reads the record first so the inline PUT keeps the n-n keys', () => {
+      flushInitialLoad([azure]);
+
+      openEditor('hour', 45);
+      component.commitEdit();
+
+      const body = flushSave({ ...azureFull, hour: 45 });
+
+      expect(body['hour']).toBe(45);
+      // The list projection has no n-n arrays, and the API's PUT replaces both junctions.
+      expect(body['jobCategoryPkids']).toEqual([5]);
+      expect(body['certificationPkids']).toEqual([7]);
+      // Columns the list never shows still travel unchanged.
+      expect(body['friendlyUrl']).toBe('azure-admin');
+      expect(body['officialTitle']).toBe('Microsoft Azure Administrator');
+    });
+
+    it('sends a date column as an ISO string in local time', () => {
+      flushInitialLoad([azure]);
+
+      openEditor('scheduleOn', new Date(2027, 1, 3, 23, 30));
+      component.commitEdit();
+
+      const body = flushSave({ ...azureFull, scheduleOn: '2027-02-03' });
+
+      expect(body['scheduleOn']).toBe('2027-02-03');
+      expect(body['scheduleOff']).toBe('2036-01-01');
+    });
+
+    it('sends the 上架狀態 dropdown and re-renders the saved label', () => {
+      flushInitialLoad([azure]);
+
+      openEditor('publishStatusPkid', 1);
+      component.commitEdit();
+
+      const body = flushSave({
+        ...azureFull,
+        publishStatusPkid: 1,
+        publishStatus: { pkid: 1, description: '草稿' },
+      });
+
+      expect(body['publishStatusPkid']).toBe(1);
+      expect(cell('publishStatusPkid').textContent?.trim()).toBe('草稿');
+    });
+
+    it('sends the 允許重聽 checkbox, including a false value', () => {
+      flushInitialLoad([azure]);
+
+      openEditor('canRepeat', false);
+      component.commitEdit();
+
+      const body = flushSave({ ...azureFull, canRepeat: false });
+
+      expect(body['canRepeat']).toBeFalse();
+      expect(cell('canRepeat').textContent?.trim()).toBe('否');
+    });
+
+    it('skips the request when the value did not change', () => {
+      flushInitialLoad([azure]);
+
+      openEditor('title', '  Azure 基礎架構  ');
+      component.commitEdit();
+
+      expect(component.editingCell()).toBeNull();
+      httpMock.expectNone(azureUrl);
+      httpMock.expectNone(coursesUrl);
+    });
+
+    it('skips the request when a date is reopened and left alone', () => {
+      flushInitialLoad([azure]);
+
+      // startEdit seeds editValue from the row, so committing straight away is a no-op.
+      component.startEdit(azure, 'scheduleOn');
+      component.commitEdit();
+
+      expect(component.editingCell()).toBeNull();
+      httpMock.expectNone(azureUrl);
+    });
+
+    describe('validation', () => {
+      /** Every case keeps the cell open, shows the message, and sends nothing. */
+      function expectBlocked(field: string, value: unknown, message: string): void {
+        openEditor(field, value);
+        component.commitEdit();
+        fixture.detectChanges();
+
+        expect(component.editError()).withContext(field).toBe(message);
+        expect(component.editingCell()?.field).withContext(field).toBe(field);
+        expect(cell(field).textContent).withContext(field).toContain(message);
+        httpMock.expectNone(azureUrl);
+        httpMock.expectNone(coursesUrl);
+
+        component.cancelEdit();
+        fixture.detectChanges();
+      }
+
+      it('blocks a cleared required text column', () => {
+        flushInitialLoad([azure]);
+
+        expectBlocked('title', '   ', '此欄位必填，不可清空。');
+        expectBlocked('courseId', '', '此欄位必填，不可清空。');
+        expectBlocked('prodCourseId', null, '此欄位必填，不可清空。');
+      });
+
+      it('blocks a cleared required dropdown, number or date', () => {
+        flushInitialLoad([azure]);
+
+        expectBlocked('publishStatusPkid', null, '此欄位必填，不可清空。');
+        expectBlocked('hour', null, '此欄位必填，不可清空。');
+        expectBlocked('scheduleOn', null, '此欄位必填，不可清空。');
+        expectBlocked('scheduleOff', null, '此欄位必填，不可清空。');
+      });
+
+      it('blocks a negative 時數, 定價 or 點數', () => {
+        flushInitialLoad([azure]);
+
+        expectBlocked('hour', -1, '不可小於 0。');
+        expectBlocked('listPrice', -0.5, '不可小於 0。');
+        expectBlocked('learningCredit', -30, '不可小於 0。');
+        expectBlocked('displayOrder', -20, '不可小於 0。');
+      });
+
+      it('blocks a value that is not a number', () => {
+        flushInitialLoad([azure]);
+
+        expectBlocked('listPrice', 'NT$24000', '請輸入有效的數字。');
+      });
+
+      it('accepts zero — non-negative, not positive', () => {
+        flushInitialLoad([azure]);
+
+        openEditor('hour', 0);
+        component.commitEdit();
+
+        expect(component.editError()).toBeNull();
+        expect(flushSave({ ...azureFull, hour: 0 })['hour']).toBe(0);
+      });
+
+      it('blocks a date the picker could not parse', () => {
+        flushInitialLoad([azure]);
+
+        expectBlocked('scheduleOn', new Date('not a date'), '請輸入有效的日期。');
+        expectBlocked('scheduleOff', 'yesterday', '請輸入有效的日期。');
+      });
+
+      it('blocks 上架日期 after 下架日期, from either end', () => {
+        flushInitialLoad([azure]);
+
+        // The row runs 2026-01-01 → 2036-01-01.
+        expectBlocked('scheduleOn', new Date(2037, 0, 1), '上架日期不可晚於下架日期。');
+        expectBlocked('scheduleOff', new Date(2025, 11, 31), '上架日期不可晚於下架日期。');
+      });
+
+      it('allows the two dates to meet on the same day', () => {
+        flushInitialLoad([azure]);
+
+        openEditor('scheduleOff', new Date(2026, 0, 1));
+        component.commitEdit();
+
+        expect(component.editError()).toBeNull();
+        expect(flushSave({ ...azureFull, scheduleOff: '2026-01-01' })['scheduleOff']).toBe(
+          '2026-01-01',
+        );
+      });
+
+      it('blocks text longer than the column', () => {
+        flushInitialLoad([azure]);
+
+        expectBlocked('courseId', 'A'.repeat(51), '不可超過 50 個字元。');
+      });
+    });
+
+    it('reverts the cell and reports the error when the save fails', () => {
+      flushInitialLoad([azure]);
+
+      const messageService = TestBed.inject(MessageService);
+      const add = spyOn(messageService, 'add');
+
+      openEditor('hour', 45);
+      component.commitEdit();
+
+      httpMock.expectOne(azureUrl).flush(azureFull);
+      httpMock
+        .expectOne(coursesUrl)
+        .flush('boom', { status: 500, statusText: 'Server Error' });
+      fixture.detectChanges();
+
+      expect(component.courses()[0].hour).toBe(30);
+      expect(cell('hour').textContent?.trim()).toBe('30');
+      expect(component.editingCell()).toBeNull();
+      expect(component.savingCell()).toBeFalse();
+      expect(add.calls.mostRecent().args[0].summary).toBe('儲存失敗');
+      expect(add.calls.mostRecent().args[0].detail).toContain('時數');
+    });
+
+    it('reverts when the record cannot be re-read', () => {
+      flushInitialLoad([azure]);
+
+      const messageService = TestBed.inject(MessageService);
+      const add = spyOn(messageService, 'add');
+
+      openEditor('title', 'Azure 進階架構');
+      component.commitEdit();
+
+      httpMock.expectOne(azureUrl).flush('gone', { status: 404, statusText: 'Not Found' });
+      fixture.detectChanges();
+
+      expect(component.courses()[0].title).toBe('Azure 基礎架構');
+      expect(component.editingCell()).toBeNull();
+      expect(add.calls.mostRecent().args[0].summary).toBe('儲存失敗');
+    });
+
+    it('discards the working value on Esc without calling the API', () => {
+      flushInitialLoad([azure]);
+
+      openEditor('title', 'thrown away');
+      component.cancelEdit();
+      fixture.detectChanges();
+
+      expect(component.editingCell()).toBeNull();
+      expect(cell('title').textContent?.trim()).toBe('Azure 基礎架構');
+      httpMock.expectNone(azureUrl);
+    });
   });
 });

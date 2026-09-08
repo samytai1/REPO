@@ -62,11 +62,12 @@ Karma needs a browser: `$env:CHROME_BIN = "C:\Program Files\Google\Chrome\Applic
 
 - Per feature under `features\{table-plural}\`: `{table}-list` (`p-table` + `p-drawer` filters), `{table}-detail` (`dl.detail-grid`), `{table}-form` (add **and** edit, mode from the route `:id`).
 - List state in session storage `{table}-list-filters` / `-sort` / `-page` through `ListStateService`; the drawer edits `draftFilters`, only 套用 commits. `bit` columns are 是／否 `p-tag`s and filter tri-state; test `!== null`, not truthiness.
+- In-place cell editing (`course-list`): `dblclick` opens, blur commits, `Esc` cancels — PrimeNG's `pEditableColumn` opens on a **single** click, so the cell shell is hand-rolled (`data-field` + `(dblclick)` + `@if`) with an `EDITABLE_FIELDS` guard; the key and FK label columns stay read-only. Validate **before** the request — a failure keeps the cell open, a save failure closes it and the untouched row shows the old value. A cell save re-reads the record with `getById` and PUTs the **whole** thing: the list projection omits the n-n keys and the API replaces junctions from the request.
 - Form: the key control is `disable()`d in edit mode, so read `form.getRawValue()`; an IDENTITY key renders only in edit mode. Trim strings; send `null` for blanks. `forkJoin` lookups with the record.
 - Service: `update()` PUTs to the collection route with the key in the body; `encodeURIComponent` only for string ids.
 - Wire-up: `{table-plural}.routes.ts` (`new` and `:id/edit` before `:id`) → lazy route in `app.routes.ts` → entry in `NAV_GROUPS` (`shared\layout\nav-menu.ts`, the only menu definition). Current: `首頁 Home` → `/featured-promo-items`; `系統管理 Admin` → `/app-roles`, `/publish-statuses`; `課程管理 Course` → `/courses`, `/partners`.
 
-**Testing** (`docs\testing.md` for the how) — backend: xUnit against hand-written fakes in `Fakes\` (194 tests). Frontend: Karma + Jasmine (267 tests). Both suites pass before a feature is reported done.
+**Testing** (`docs\testing.md` for the how) — backend: xUnit against hand-written fakes in `Fakes\` (194 tests). Frontend: Karma + Jasmine (302 tests). Both suites pass before a feature is reported done.
 
 ---
 

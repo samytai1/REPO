@@ -44,6 +44,11 @@
 
       <dt>顯示順序</dt>
       <dd>{{ current.displayOrder }}</dd>
+
+      <dt>QR Code</dt>
+      <dd>
+        <app-qr-code [data]="courseShowUrl(current)" [caption]="current.courseId" />
+      </dd>
     </dl>
   </div>
 

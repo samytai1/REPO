@@ -7,6 +7,10 @@ import { TagModule } from 'primeng/tag';
 
 import { CertificationLookup, Course, certificationLabel } from '@core/models';
 import { CourseService } from '@core/services';
+import { QrCode } from '@shared/qr-code/qr-code';
+
+/** Public 課程介紹 page the 基本資料 QR code points at: `{base}/{pkid}/{courseId}`. */
+const COURSE_SHOW_URL_BASE = 'https://www.uuu.com.tw/Course/Show';
 
 /**
  * 課程 Course — read-only detail page.
@@ -17,7 +21,7 @@ import { CourseService } from '@core/services';
  */
 @Component({
   selector: 'app-course-detail',
-  imports: [DecimalPipe, RouterLink, ButtonModule, TagModule],
+  imports: [DecimalPipe, RouterLink, ButtonModule, TagModule, QrCode],
   templateUrl: './course-detail.html',
   styleUrl: './course-detail.scss',
 })
@@ -53,6 +57,11 @@ export class CourseDetail implements OnInit {
         });
       },
     });
+  }
+
+  /** The public course page encoded into the 基本資料 QR code. */
+  protected courseShowUrl(course: Course): string {
+    return `${COURSE_SHOW_URL_BASE}/${course.pkid}/${encodeURIComponent(course.courseId)}`;
   }
 
   /** A certification with a null title still needs a readable chip. */

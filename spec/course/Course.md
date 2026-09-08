@@ -655,11 +655,48 @@ New file `core/utils/date.util.ts` — the canonical helpers the convention name
 - Delete confirmation: `確定要刪除主代碼 <b>12</b>「Azure 基礎架構」？`; a 409 shows
   「此課程已被課程問答、相關連結或熱門課程使用，無法刪除。」
 
+### In-place editing (list page)
+
+Every list column is editable in the table itself except the three that stay read-only:
+主代碼 `pkid` (IDENTITY), 原廠 `partner.name` and 課程群組 `courseGroup.description` (FK lookups,
+edited on the form). 操作 is not a data column.
+
+- **Open**: `dblclick` on the cell. A single click must not start editing, so PrimeNG's
+  `pEditableColumn` / `p-cellEditor` pair is **not** used — that directive opens on `click` and has
+  no double-click mode. The cell instead carries `data-field`, a `(dblclick)` binding and an `@if`
+  that swaps the display text for a PrimeNG widget. `EDITABLE_FIELDS` guards `startEdit()` so a
+  read-only column cannot be opened even programmatically.
+- **Widgets**: `input pInputText` for the three text columns (`maxlength` per the SQL width),
+  `p-inputnumber` (`[min]="0"`, `[useGrouping]="false"`, fraction digits per the `decimal` scale)
+  for 顯示順序／時數／定價／點數, `p-datepicker` for the two dates, `p-select` for 上架狀態
+  (`publishStatusEditOptions` — required, so no 不限／無 entry), `p-checkbox [binary]="true"` for
+  允許重聽.
+- **Commit**: the widget's blur (`(blur)` / `(onBlur)`) and Enter; `Esc` cancels. One cell edits at
+  a time, so the whole table shares one `editError` slot rendered through an `ngTemplateOutlet`.
+- **Validation** runs before the request. Invalid → the inline `.field-error` shows and the cell
+  **stays open**; nothing is sent.
+  - required, cannot be cleared: 課程名稱, 簡介代碼, 科目代碼, 上架狀態, 上架日期, 下架日期,
+    顯示順序, 時數, 定價, 點數 →「此欄位必填，不可清空。」
+  - 時數／定價／點數／顯示順序 must be finite and `>= 0` →「請輸入有效的數字。」／「不可小於 0。」
+  - both dates must parse →「請輸入有效的日期。」
+  - `scheduleOn <= scheduleOff`, checked from whichever end is being edited, the other bound read
+    from the row →「上架日期不可晚於下架日期。」
+  - text is trimmed and length-checked against the column width.
+- **Persist**: `GET /api/courses/{id}` → merge the one field → `PUT /api/courses`. The re-read is
+  required, not an optimisation: the list projection returns `jobCategories` / `certifications` as
+  empty arrays (only `…Count`), while `UpdateAsync` **replaces** both junctions from the request —
+  PUTting a list row straight back would wipe the course's 職務類別 and 對應認證 links.
+- **After the save**: the response replaces the row in place (so the 上架狀態 label and the tags
+  re-render) and a 已更新 toast shows. An unchanged value closes the editor without any request.
+- **On failure** (either leg): the row was never mutated, so closing the editor restores the
+  previous value; a 儲存失敗 toast names the column.
+
 ### Detail component
 
 Read-only `dl.detail-grid`, grouped with `<h3>` sub-headings:
 
-1. **基本資料** — 主代碼, 課程名稱, 官方課程名稱, 簡介代碼, 科目代碼, 網址代稱, 顯示順序
+1. **基本資料** — 主代碼, 課程名稱, 官方課程名稱, 簡介代碼, 科目代碼, 網址代稱, 顯示順序,
+   QR Code (`<app-qr-code>`, see below)
 2. **分類與狀態** — 原廠 (link → `/partners/:id`), 課程群組 (plain text for now),
    上架狀態 (link → `/publish-statuses/:id`), 允許重聽 (`p-tag`)
 3. **排程與費用** — 上架日期, 下架日期, 時數, 定價, 點數
@@ -668,6 +705,14 @@ Read-only `dl.detail-grid`, grouped with `<h3>` sub-headings:
    (long text preserves newlines via `white-space: pre-wrap`)
 
 Null values render `—` with `empty-text`. 返回 / 編輯 buttons in the header.
+
+**QR Code row (基本資料).** Encodes the public course page
+`https://www.uuu.com.tw/Course/Show/{pkid}/{courseId}` — the base lives in `COURSE_SHOW_URL_BASE`
+in `course-detail.ts`, and `courseId` goes through `encodeURIComponent`. Rendered by the shared
+`app-qr-code` component (`shared/qr-code/`), which takes `data` and `caption` (簡介代碼
+`CourseId` — shown above the code and used as its `alt` text) and offers a 下載 button that saves
+the code as `{CourseId}.png`. Encoding runs through the `qrcode` package and is asynchronous, so a
+spec must `await fixture.whenStable()` before reading the `<img>`.
 
 ### Form component
 
@@ -790,5 +835,6 @@ entity): `{ label: '課程 Course', icon: 'pi pi-book', route: '/courses' }`.
 | `src/CMS.NG/src/app/features/courses/course-detail/*` | Create |
 | `src/CMS.NG/src/app/features/courses/course-form/*` | Create |
 | `src/CMS.NG/src/app/features/courses/courses.routes.ts` | Create |
+| `src/CMS.NG/src/app/shared/qr-code/*` | Create — shared QR code + PNG download |
 | `src/CMS.NG/src/app/app.routes.ts` | Modify — lazy route |
 | `src/CMS.NG/src/app/shared/layout/nav-menu.ts` | Modify — entry in the existing 課程管理 Course group |

@@ -13,6 +13,7 @@
   --app-content-bg: #f4f6fa;
   --app-accent: #10b981;
   --app-heading: #1e293b;
+  --app-table-head-bg: #e0f2fe;
 }
 
 html,
@@ -127,5 +128,16 @@ body {
     flex-wrap: wrap;
     gap: 0.25rem;
     white-space: normal;
+  }
+}
+
+/* List tables: light-blue band behind the paginator and the column headers. */
+.p-datatable {
+  .p-paginator {
+    background: var(--app-table-head-bg);
+  }
+
+  .p-datatable-thead > tr > th {
+    background: var(--app-table-head-bg);
   }
 }

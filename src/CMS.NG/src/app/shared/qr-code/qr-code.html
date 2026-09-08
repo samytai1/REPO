@@ -1,0 +1,22 @@
+<div class="qr-code">
+  <span class="qr-code__caption">{{ caption() }}</span>
+
+  @if (imageSrc(); as src) {
+    <img
+      class="qr-code__image"
+      [src]="src"
+      [alt]="caption()"
+      [width]="size()"
+      [height]="size()"
+    />
+    <p-button
+      label="下載"
+      icon="pi pi-download"
+      severity="secondary"
+      size="small"
+      (onClick)="download()"
+    />
+  } @else {
+    <span class="empty-text">產生中…</span>
+  }
+</div>

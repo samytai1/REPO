@@ -5,6 +5,7 @@ import { ActivatedRoute, provideRouter, Router } from '@angular/router';
 import { provideNoopAnimations } from '@angular/platform-browser/animations';
 import { MessageService } from 'primeng/api';
 import { environment } from '@environments/environment';
+import QRCode from 'qrcode';
 
 import { Course } from '@core/models';
 import { CourseDetail } from './course-detail';
@@ -86,6 +87,13 @@ describe('CourseDetail', () => {
 
   function flush(course: Course = azure): void {
     httpMock.expectOne(`${environment.apiBaseUrl}/courses/${course.pkid}`).flush(course);
+    fixture.detectChanges();
+  }
+
+  /** The QR code encodes asynchronously; wait for the data URL before reading the `<img>`. */
+  async function flushQrCode(course: Course = azure): Promise<void> {
+    flush(course);
+    await fixture.whenStable();
     fixture.detectChanges();
   }
 
@@ -210,6 +218,57 @@ describe('CourseDetail', () => {
 
     expect(component.course()).toBeNull();
     expect(fixture.nativeElement.textContent).toContain('查無資料');
+  });
+
+  it('renders a QR code in 基本資料 encoding the public course URL', async () => {
+    await setup('1');
+    const encode = spyOn(QRCode, 'toDataURL').and.callThrough();
+    await flushQrCode();
+
+    const basicSection: HTMLElement = fixture.nativeElement.querySelector(
+      '.course-detail__section',
+    );
+    const qr: HTMLElement = basicSection.querySelector('app-qr-code')!;
+    expect(qr).withContext('the QR code belongs to the 基本資料 card').toBeTruthy();
+
+    expect(encode.calls.mostRecent().args[0]).toBe('https://www.uuu.com.tw/Course/Show/1/AZ-104');
+
+    const img: HTMLImageElement = qr.querySelector('img.qr-code__image')!;
+    expect(img.getAttribute('src')).toMatch(/^data:image\/png;base64,/);
+    expect(qr.querySelector('.qr-code__caption')?.textContent?.trim()).toBe('AZ-104');
+    expect(img.getAttribute('alt')).toBe('AZ-104');
+  });
+
+  it('escapes a 簡介代碼 that is not URL-safe', async () => {
+    await setup('7');
+    const encode = spyOn(QRCode, 'toDataURL').and.callThrough();
+    await flushQrCode({ ...azure, pkid: 7, courseId: 'AZ 104/A' });
+
+    expect(encode.calls.mostRecent().args[0]).toBe(
+      'https://www.uuu.com.tw/Course/Show/7/AZ%20104%2FA',
+    );
+  });
+
+  it('downloads the QR code as a PNG named after 簡介代碼', async () => {
+    await setup('1');
+    await flushQrCode();
+
+    const anchor = document.createElement('a');
+    const click = spyOn(anchor, 'click');
+    const create = document.createElement.bind(document);
+    spyOn(document, 'createElement').and.callFake(
+      (tag: string) => (tag === 'a' ? anchor : create(tag)) as HTMLElement,
+    );
+
+    const download: HTMLButtonElement = fixture.nativeElement.querySelector(
+      'app-qr-code p-button button',
+    );
+    expect(download.textContent).toContain('下載');
+    download.click();
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(anchor.download).toBe('AZ-104.png');
+    expect(anchor.getAttribute('href')).toMatch(/^data:image\/png;base64,/);
   });
 
   it('navigates back to the list and into the edit form', async () => {

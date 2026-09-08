@@ -13,12 +13,13 @@ Controller tests against hand-written in-memory fakes in `Fakes\`; no mocking li
 - `{Table}sRoutingConventionTests` pins the route shape via reflection — `api/{plural}`, the `query` sub-route, `{id:int}` (or bare `{id}`), PUT with no template, the id parameter's CLR type, and that the create DTO has no `Pkid` when the key is IDENTITY — so a controller that drifts from the convention fails the build rather than the frontend.
 - `LookupsControllerTests` builds one controller with every fake and asserts each lookup's sort order.
 
-## Frontend — `src\CMS.NG` (267 tests)
+## Frontend — `src\CMS.NG` (302 tests)
 
 Default Karma + Jasmine. Services use `provideHttpClientTesting` with `httpMock.verify()` in `afterEach`. Components are tested through their real templates with `provideNoopAnimations()`; protected members are reached via a locally declared `…Internals` type alias rather than `as any`.
 
 - Service specs assert every method's URL and verb, that `create` sends no `pkid`, that `update` PUTs to the collection URL with `pkid` in the body, and error passthrough (404, 409).
 - List specs: a `flushInitialLoad()` helper answers the lookups **and** the initial `POST /query`. Cover rendering (each requested column, null fallbacks, `p-tag` for bits), filters (apply → body, `false` counts as active, persist, restore, reset), sort/page persistence, navigation, and delete (accepted, dismissed, 409 message).
+- In-place cell editing (`course-list.spec.ts`): load a **single** row so `tbody tr:first-child` is deterministic, then address cells by `td[data-field="…"]`. Drive the real DOM for the gesture — a `MouseEvent('dblclick')` opens the editor, a `click` must not — and for at least one full round trip (set `input.value`, dispatch `input` then `blur`). Validation cases go through the component (`startEdit` → `editValue` → `commitEdit`) and assert all four halves: the message, the cell **still open**, and `expectNone` on both the GET and the PUT. Every save flushes two requests, the `getById` re-read and the PUT, and the PUT body is worth asserting on the fields the list never shows (`friendlyUrl`, the n-n key arrays).
 - Form specs: a `setup(pkid)` helper flushes every lookup, then the record in edit mode. Cover add-mode defaults, option mapping, required-field guard, derived defaults, the POST body (trimmed, nulls, ISO dates, n-n arrays, no `pkid`), edit-mode patching (dates parsed, n-n keys), the locked key, the PUT body, cancel in both modes.
 - Detail specs: loads, renders every section, null fallbacks, chips, FK links by `href`, no request without a usable key, 404 empty state, navigation.
 

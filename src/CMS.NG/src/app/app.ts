@@ -17,7 +17,7 @@ import { NAV_GROUPS, NavGroup } from '@shared/layout/nav-menu';
   styleUrl: './app.scss',
 })
 export class App {
-  protected readonly brand = 'UWA';
+  protected readonly brand = 'UUU';
   protected readonly navGroups: NavGroup[] = NAV_GROUPS;
 
   protected readonly collapsed = signal(false);

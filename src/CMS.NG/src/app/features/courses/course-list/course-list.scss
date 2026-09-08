@@ -12,6 +12,34 @@
     gap: 0.15rem;
   }
 
+  /* An editable cell hints at the double-click; the three read-only ones keep the default cursor. */
+  &__table td[data-field]:not([data-field='pkid']):not([data-field='partner']):not(
+      [data-field='courseGroup']
+    ) {
+    cursor: cell;
+  }
+
+  &__cell--editing {
+    background: var(--p-content-hover-background, rgb(0 0 0 / 4%));
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+
+  &__editor {
+    width: 100%;
+  }
+
+  &__editor-label {
+    margin-left: 0.4rem;
+    vertical-align: middle;
+  }
+
+  &__cell-error {
+    display: block;
+    text-align: left;
+    white-space: normal;
+  }
+
   &__drawer-actions {
     display: flex;
     justify-content: flex-end;

@@ -29,6 +29,7 @@ Templates to copy: `partners\*` (IDENTITY key, no lookups), `app-roles\*` (n-n m
 - A drawer that filters on dates keeps a `DraftFilters` copy with `Date` fields for `p-datepicker` and converts to ISO on 套用 (`course-list.ts` `toDraft` / `toQuery`).
 - FK label columns read the row's nav object (`course.partner?.name`); the drawer lookups load through `forkJoin` in parallel with the query and only feed the option lists.
 - Wide tables: `[scrollable]="true"` with a `[tableStyle]` min-width, and the 操作 column frozen right (`pFrozenColumn alignFrozen="right"`).
+- **In-place cell editing** (`course-list` is the reference; `spec\course\Course.md` has the full rules). PrimeNG's `pEditableColumn` opens on a **single** click and has no double-click mode, so a dblclick-only page hand-rolls the cell shell — `data-field` + `(dblclick)="startEdit(row, field)"` + an `@if` that swaps the text for the matching PrimeNG widget — and keeps an `EDITABLE_FIELDS` guard inside `startEdit` so a read-only column cannot be opened programmatically either. Commit on the widget's `(blur)` / `(onBlur)`, cancel on `Esc`. Validate **before** the request: a failure sets one shared `editError` and leaves the cell open; a save failure closes it, which restores the previous value because the row was never mutated. A cell save must send the **whole** record — re-read it with `getById` first when the list projection omits anything the PUT rewrites, n-n keys above all (the API replaces junctions from the request, so a list row PUT straight back wipes them).
 - Delete confirmation names the record: `確定要刪除主代碼 ${pkid}「${name}」？`; a 409 shows the Chinese "still used by …" message.
 
 ## Detail page rules
@@ -36,6 +37,7 @@ Templates to copy: `partners\*` (IDENTITY key, no lookups), `app-roles\*` (n-n m
 - One `page-card` per section with an `<h2 class="form-section__title">`; `dl.detail-grid` inside.
 - Nullable values render `—` with `empty-text`; long text gets `white-space: pre-wrap`.
 - n-n members render as `p-tag` chips with the count in the heading (`職務類別（{{ count }}）`).
+- A QR code for an external page is the shared `app-qr-code` (`shared\qr-code\`): signal inputs `data` (the URL), `caption` (the label above the code, its `alt` text and the download's file name) and `size`. It encodes with the `qrcode` package into a `data:image/png` URL — asynchronous, so a spec awaits `fixture.whenStable()` — and its 下載 button clicks a throw-away anchor carrying that same URL, so the saved PNG is exactly what is on screen. `qrcode` is CommonJS and is listed in `allowedCommonJsDependencies`. `course-detail` is its one user (`COURSE_SHOW_URL_BASE`).
 - FK values link to the target's detail page **only when that route exists** (`/partners/:id`, `/publish-statuses/:id`); otherwise plain text. Child-table link buttons (`對應…`) are deferred until the child feature exists — record what to add in the spec.
 
 ## Form page rules
