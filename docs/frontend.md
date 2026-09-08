@@ -1,6 +1,6 @@
 # Frontend reference
 
-Read before writing a list / detail / form page or a service. `CLAUDE.md` has the summary; this is the detail.
+Read **before** writing a list / detail / form page or a service. `CLAUDE.md` indexes the docs and holds the cross-cutting invariants; the conventions themselves are here.
 
 **Stack:** Angular 20 standalone (no NgModules), PrimeNG 20.4.0 + `@primeuix/themes` Aura + primeicons, Reactive Forms, signals for component state.
 
@@ -51,6 +51,7 @@ Templates to copy: `partners\*` (IDENTITY key, no lookups), `app-roles\*` (n-n m
 - A form-level default derived from another control (`scheduleOff = scheduleOn + 10 years`) subscribes to `valueChanges` in the constructor with `takeUntilDestroyed()`, writes with `{ emitEvent: false }`, and bails out in edit mode or once the target control is `dirty` (`course-form.ts`).
 - Numeric widgets: `p-inputnumber` with `[useGrouping]="false"` for keys and orders; `[maxFractionDigits]` / `[minFractionDigits]` matching the column's `decimal` scale.
 - Long text: `textarea pTextarea`; `maxlength` matches the column, none for `nvarchar(max)`.
+- A form long enough to scroll pins its 取消／儲存 header (`course-form__toolbar`: `position: sticky; top: 0; z-index: 20`). The page scrolls on the **document** — `.app-content` sets no `overflow`, and an `overflow` anywhere up the ancestor chain silently kills `sticky` — so the bar pins to the viewport but only ever spans the content grid column, never the sidebar. Keep the z-index low: PrimeNG's `appendTo="body"` overlays and the toast must still stack above it. A spec asserts the **computed** `position`, not the class; a bar that stopped sticking keeps its class.
 
 ## Service rules
 
@@ -60,7 +61,28 @@ Lookups all live in `lookup.service.ts` (`getPartners`, `getCourseGroups`, …);
 
 ## Sidebar and routing
 
+- The root router lazy-loads each feature's `{table-plural}.routes.ts`. Order matters: `new` and `:id/edit` must precede `:id`.
 - Add the entry to `NAV_GROUPS` in `src\app\shared\layout\nav-menu.ts`. That is the only place the menu is defined; `app.html` renders it. Current entries: `首頁 Home` → `上稿作業 FeaturedPromoItem` → `/featured-promo-items`; `系統管理 Admin` → `角色 AppRole` → `/app-roles`, `發布狀態 PublishStatus` → `/publish-statuses`; `課程管理 Course` → `課程 Course` → `/courses`, `合作夥伴 Partner` → `/partners`.
+- Every feature route carries `canActivate: [authGuard]`; only `login` is public. A new feature adds the guard alongside its `loadChildren` — see below. `profile` is a `loadComponent` route rather than a feature triple, but it carries the guard like everything else.
+- A `NavGroup` may carry `roles`. Omit it and everyone signed in sees the group; list roles and `App` filters the group out entirely for anyone else. `系統管理 Admin` lists `Admin`.
+
+## Login, 個人資料 and the signed-in session
+
+The two pages outside the feature triple pattern. `spec\auth\Auth.md` is their build spec.
+
+- The profile (`userId`, `userName`, `accessToken`) lives in **session** storage under `cms-auth`, so it dies with the tab. `AuthService` (`core\services\auth.service.ts`) owns it; `LOGIN_ROUTE`, `PROFILE_ROUTE` and `DEFAULT_ROUTE` are exported from there so nothing hard-codes `'/login'`.
+- **Storage is the source of truth for "is there a token?"** — `token()` / `hasToken()` re-read it on every call, because another tab may have signed out. The `profile` / `userName` / `roles` signals mirror it for the templates.
+- **Roles come from the token**, decoded (not verified) by `core\utils\jwt.util.ts`: `role` claims serialise as a bare string when there is one and an array when there are several, and both shapes flatten to a list. Never add an API call to fetch roles. This gates what the menu *shows*; the API re-validates every request regardless.
+- `authTokenInterceptor` attaches `Authorization: Bearer …` to requests whose URL starts with `environment.apiBaseUrl` — and to nothing else, so the token never leaks to a third party.
+- `authErrorInterceptor` turns a 401 into a sign-out: clear the session, navigate to `/login` with the current URL as `returnUrl`, and re-throw so the caller still sees the error. `/auth/login` itself is exempt — its 401 means "wrong password", and the login page shows that message.
+- `authGuard` (`core\guards\auth.guard.ts`) returns a `UrlTree` to `/login?returnUrl=…` rather than a boolean, so the redirect is part of the same navigation.
+- **Signing out clears *all* of session storage**, list filters included — the next user must not inherit the previous one's view. `AuthService.clearSession()` is the single place that happens, and both the 登出 button and the 401 path go through it.
+- A `returnUrl` is honoured only when it is a path inside this app: it must start with a single `/` and must not be the login page. Anything else lands on `DEFAULT_ROUTE`.
+- The shell chrome (sidebar + header) renders only when signed in — `app.html` guards both on `signedIn()`, and `.app-shell--anonymous` drops the sidebar column so the login page fills the viewport.
+- The header's user name is the trigger for a **user menu** — a `p-menu` in `[popup]` mode whose model is `App.userMenuItems`: 個人資料 as a `routerLink`, 登出 as a `command` (signing out has to clear the session *before* the navigation). It deliberately carries **no** `appendTo`, unlike the drawer selects: rendering inline means the overlay dies with the shell instead of being left behind in `document.body` for the next spec to find.
+- **個人資料 My Profile** (`features\profile\`) is a single component on `/profile`, not a list / detail / form triple, because everything it shows is already in the session. 帳號 and the roles render read-only — 帳號 from `AuthService.userId`, the roles as `p-tag` chips from `AuthService.roles` — with **no GET endpoint and no second request**, the same rule the sidebar's role gate follows. 使用者名稱 is the only control: required, trimmed, and trimmed-to-empty rejected client-side with the same message the API's 400 carries.
+- `AuthService.updateUserName(name)` PUTs `{ userName }` — and only that — to `/api/auth/profile`, then merges the returned name into the stored profile. The **token is kept as it is**: the API does not re-issue one, so `userId` and the roles are unchanged, and the header updates because it reads the `userName` signal. Store what the API returned, not what was typed.
+- `core\testing\auth.testing.ts` is test-only: `signIn(roles)` writes a session, `fakeAccessToken(roles)` builds a JWT-shaped token. Nothing in the browser verifies a signature, so a correctly *shaped* token is all a spec needs.
 
 ## Custom pages
 
@@ -70,7 +92,6 @@ as a feature folder with its own components and a single route, reuse the same s
 decisions. `featured-promo-items\` is the reference: a computed grid (`days`) so empty cells render,
 an inline child form driven by signal inputs and `output()`s, a `p-autocomplete` FK lookup whose
 selection pre-fills sibling fields, and a clipboard signal mirrored to session storage.
-- The root router lazy-loads each feature's `{table-plural}.routes.ts`. Order matters: `new` and `:id/edit` must precede `:id`.
 
 ## Styling
 

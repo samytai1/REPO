@@ -1,5 +1,6 @@
 export * from './app-role.model';
 export * from './app-user.model';
+export * from './auth.model';
 export * from './certification.model';
 export * from './course.model';
 export * from './course-group.model';

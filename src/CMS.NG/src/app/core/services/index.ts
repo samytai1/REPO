@@ -1,4 +1,5 @@
 export * from './app-role.service';
+export * from './auth.service';
 export * from './course.service';
 export * from './featured-promo-item.service';
 export * from './lookup.service';

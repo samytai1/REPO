@@ -1,0 +1,39 @@
+/* One narrow column: a two-field page at full width leaves a 1200px-wide text box. The header
+   card is capped to the same width, so the two do not read as misaligned. */
+.profile {
+  &__header,
+  &__section {
+    max-width: 40rem;
+  }
+
+  &__section {
+    margin-top: 0.75rem;
+  }
+
+  &__roles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  &__hint {
+    margin: 1rem 0 0;
+    color: #94a3b8;
+    font-size: 0.8rem;
+  }
+
+  &__edit-title {
+    margin-top: 1.5rem;
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+  }
+
+  input {
+    width: 100%;
+  }
+}

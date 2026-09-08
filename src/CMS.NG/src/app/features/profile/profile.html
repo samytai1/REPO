@@ -1,0 +1,49 @@
+<div class="page-header page-card profile__header">
+  <h1 class="page-header__title">個人資料 My Profile</h1>
+</div>
+
+<form class="page-card profile__section" [formGroup]="form" (ngSubmit)="save()">
+  <h2 class="form-section__title">帳號資料</h2>
+
+  <dl class="detail-grid">
+    <dt>帳號</dt>
+    <dd data-field="userId">{{ userId() }}</dd>
+
+    <dt>角色</dt>
+    <dd data-field="roles">
+      @if (hasRoles()) {
+        <span class="profile__roles">
+          @for (role of roles(); track role) {
+            <p-tag [value]="role" severity="info" />
+          }
+        </span>
+      } @else {
+        <span class="empty-text">未設定角色</span>
+      }
+    </dd>
+  </dl>
+
+  <p class="profile__hint">帳號與角色由系統管理員維護，無法自行修改。</p>
+
+  <h2 class="form-section__title profile__edit-title">可編輯欄位</h2>
+
+  <div class="form-field">
+    <label for="userName">使用者名稱 <span class="required">*</span></label>
+    <input
+      id="userName"
+      pInputText
+      type="text"
+      formControlName="userName"
+      maxlength="200"
+      placeholder="請輸入使用者名稱"
+    />
+    @if (isInvalid()) {
+      <div class="field-error">使用者名稱為必填。</div>
+    }
+  </div>
+
+  <div class="profile__actions">
+    <p-button label="取消" icon="pi pi-times" severity="secondary" type="button" (onClick)="reset()" />
+    <p-button label="儲存" icon="pi pi-check" severity="success" type="submit" [loading]="saving()" />
+  </div>
+</form>

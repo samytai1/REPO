@@ -2,9 +2,10 @@
 
 Read before writing tests, or when a test fails for a non-obvious reason.
 
-## Backend — `src\CMS.API.Tests` (194 tests)
+## Backend — `src\CMS.API.Tests` (275 tests)
 
-Controller tests against hand-written in-memory fakes in `Fakes\`; no mocking library.
+Controller tests against hand-written in-memory fakes in `Fakes\`; no mocking library. The two
+authorization suites are the exception — they host the real pipeline (see below).
 
 - A fake must mirror its SQL repository's semantics — sort order, filter breadth, n-n replace and de-duplication, blank-to-null normalisation, IDENTITY assignment — so the tests stay meaningful. `InMemoryCourseRepository` is the fullest example: it also seeds the FK targets so nav objects resolve, and exposes `JobCategoryLinks(pkid)` / `CertificationLinks(pkid)` so the n-n write tests can read the junction state.
 - Give the fake a seam for anything the SQL layer does that memory cannot: `MarkInUse(pkid)` reproduces the FK-violation delete path.
@@ -12,8 +13,12 @@ Controller tests against hand-written in-memory fakes in `Fakes\`; no mocking li
 - Every `{Table}sControllerTests` covers: list (sort + projection), each query filter in turn, get-by-id found / not-found, create (201 + `CreatedAtAction` route value + trimming + null normalisation + junctions), update (+ junction replace, + 404), delete (204 / 404 / 409), and invalid `ModelState` → 400.
 - `{Table}sRoutingConventionTests` pins the route shape via reflection — `api/{plural}`, the `query` sub-route, `{id:int}` (or bare `{id}`), PUT with no template, the id parameter's CLR type, and that the create DTO has no `Pkid` when the key is IDENTITY — so a controller that drifts from the convention fails the build rather than the frontend.
 - `LookupsControllerTests` builds one controller with every fake and asserts each lookup's sort order.
+- **Authorization is the exception to "test the controller directly."** A `[Fact]` calling an action never touches the middleware, so `AuthorizationTests` hosts the real `Program` through `TestApiFactory : WebApplicationFactory<Program>` and asserts over HTTP: 401 without a token, 200 with one from a real login, and 401 for a malformed, expired, foreign-signed or tampered token. Only the repositories a test reaches are swapped for fakes — an unauthenticated request is rejected before its controller is built, so the others are never resolved and the SQL connection string is never read.
+- `TestApiFactory.RotateSigningKey` rewrites the in-memory SysConfig row; the test that uses it builds its **own** factory so the rotation cannot leak into the class fixture.
+- `AuthorizationConventionTests` pins the wiring by reflection and by resolving the host's options: the fallback policy carries `DenyAnonymousAuthorizationRequirement`, Bearer is the default scheme, `IssuerSigningKey` is null while the resolver is not (a fixed key would survive a rotation), **no controller type** is `[AllowAnonymous]`, and `AuthController.Login` is the only `[AllowAnonymous]` action in the assembly. It also asserts the reflection query found the controllers, so the "only one" test cannot pass vacuously.
+- **An endpoint that acts on the caller** needs three angles, because no single one covers it. `AuthControllerTests` builds the controller with a hand-made `ClaimsPrincipal` (`SignedInAs`) and asserts the token's user is the row that changes while every other account is untouched; a reflection test asserts the request DTO has no `UserId` and no role property, which is *why* a body cannot name an account; and `AuthorizationTests` puts **raw JSON** carrying a foreign `userId` through the real pipeline, because the typed DTO cannot express that request at all. Those HTTP tests build their **own** `TestApiFactory` — they mutate the seeded user, and the class fixture is shared.
 
-## Frontend — `src\CMS.NG` (302 tests)
+## Frontend — `src\CMS.NG` (376 tests)
 
 Default Karma + Jasmine. Services use `provideHttpClientTesting` with `httpMock.verify()` in `afterEach`. Components are tested through their real templates with `provideNoopAnimations()`; protected members are reached via a locally declared `…Internals` type alias rather than `as any`.
 
@@ -21,7 +26,13 @@ Default Karma + Jasmine. Services use `provideHttpClientTesting` with `httpMock.
 - List specs: a `flushInitialLoad()` helper answers the lookups **and** the initial `POST /query`. Cover rendering (each requested column, null fallbacks, `p-tag` for bits), filters (apply → body, `false` counts as active, persist, restore, reset), sort/page persistence, navigation, and delete (accepted, dismissed, 409 message).
 - In-place cell editing (`course-list.spec.ts`): load a **single** row so `tbody tr:first-child` is deterministic, then address cells by `td[data-field="…"]`. Drive the real DOM for the gesture — a `MouseEvent('dblclick')` opens the editor, a `click` must not — and for at least one full round trip (set `input.value`, dispatch `input` then `blur`). Validation cases go through the component (`startEdit` → `editValue` → `commitEdit`) and assert all four halves: the message, the cell **still open**, and `expectNone` on both the GET and the PUT. Every save flushes two requests, the `getById` re-read and the PUT, and the PUT body is worth asserting on the fields the list never shows (`friendlyUrl`, the n-n key arrays).
 - Form specs: a `setup(pkid)` helper flushes every lookup, then the record in edit mode. Cover add-mode defaults, option mapping, required-field guard, derived defaults, the POST body (trimmed, nulls, ISO dates, n-n arrays, no `pkid`), edit-mode patching (dates parsed, n-n keys), the locked key, the PUT body, cancel in both modes.
+- Layout that the user depends on is asserted through `getComputedStyle`, not through the class name — component styles really are applied in Karma, and a rule that stopped applying leaves the class behind. `course-form.spec.ts` pins the sticky toolbar this way in **both** modes (`position`, `top`, a z-index above the form body, and 取消／儲存 still inside the bar with 儲存 the submit button).
 - Detail specs: loads, renders every section, null fallbacks, chips, FK links by `href`, no request without a usable key, 404 empty state, navigation.
+- Auth specs seed the session with `signIn(roles)` from `core\testing\auth.testing.ts` **before** the TestBed is configured — `AuthService` reads session storage in its constructor, so a session written afterwards is not picked up. Every auth spec clears `sessionStorage` in both `beforeEach` and `afterEach`; a leaked session silently changes what the next spec renders.
+- Interceptors are tested through a real `HttpClient`: `provideHttpClient(withInterceptors([…]))` next to `provideHttpClientTesting()`, then assert on `request.request.headers`. The 401 spec spies on `Router.navigate` and on the `url` getter (`spyOnProperty(router, 'url', 'get')`) to pin the `returnUrl`.
+- `app.spec.ts` derives its nav-item count from the groups **visible to the roles under test**, not from `NAV_GROUPS` outright — the shell now filters role-gated groups out of the DOM entirely.
+- The header **user menu** is a `p-menu` popup: its entries exist only after the trigger is clicked, so a spec calls `openUserMenu(fixture)` first and only then looks for 個人資料 / 登出. The menu has no `appendTo`, so the entries are under `fixture.nativeElement`; `app.spec.ts` still destroys the fixture in `afterEach`, because an open overlay that outlives its component is exactly the kind of leak the next spec finds instead of its own.
+- `profile.spec.ts` asserts read-only by **absence**, not by a `disabled` attribute: there is no `#userId` control and the form holds exactly one `<input>`. A save flushes one PUT, asserts the body is `{ userName }` and nothing else, and then checks all three places the new name has to land — `AuthService.userName()`, session storage, and the input itself.
 
 ## Gotchas that already bit once
 

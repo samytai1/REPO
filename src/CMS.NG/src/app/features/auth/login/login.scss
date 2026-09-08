@@ -1,0 +1,43 @@
+.login {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+
+  &__card {
+    width: 100%;
+    max-width: 24rem;
+    padding: 1.75rem;
+  }
+
+  &__title {
+    margin: 0 0 0.35rem;
+    font-size: 1.4rem;
+    font-weight: 700;
+  }
+
+  &__subtitle {
+    margin: 0 0 1.5rem;
+    color: #94a3b8;
+    font-size: 0.875rem;
+  }
+
+  &__error {
+    margin-bottom: 1rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid #fecaca;
+    border-radius: 6px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 0.875rem;
+  }
+
+  input {
+    width: 100%;
+  }
+}
+
+:host ::ng-deep .w-full {
+  width: 100%;
+}

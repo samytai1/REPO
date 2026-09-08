@@ -1,6 +1,6 @@
 # Backend reference
 
-Read before writing a model, repository or controller. `CLAUDE.md` has the summary; this is the detail.
+Read **before** writing a model, repository or controller. `CLAUDE.md` indexes the docs and holds the cross-cutting invariants; the conventions themselves are here.
 
 **Stack:** .NET 9, Dapper 2.1.66 (no EF), Microsoft.Data.SqlClient 6.0.2, Swashbuckle 7.2.0.
 
@@ -52,3 +52,82 @@ Read before writing a model, repository or controller. `CLAUDE.md` has the summa
 - Use `BadRequest(ModelState)`, not `ValidationProblem(...)`: the latter needs a `ProblemDetailsFactory` from `HttpContext`, which unit-tested controllers constructed directly do not have.
 - The 409 body is a `ProblemDetails` whose `Detail` names, in Chinese, the child tables that block the delete — the frontend shows that text.
 - `Program.cs` registers every repository as scoped, enables Swagger unconditionally at `/swagger`, and allows CORS from any loopback origin. XML doc comments are compiled (`GenerateDocumentationFile`) and fed to Swagger; `NoWarn` includes 1591 — so every public member still gets a `///` summary.
+
+## Authentication and authorization
+
+`AuthController` holds the endpoints that are not a CRUD table, so it is routed at `api/auth`
+rather than a kebab-case plural: `POST /api/auth/login` and `PUT /api/auth/profile`. It is the
+reference for anything that reads credentials or config, and for anything that acts **on the
+caller**.
+
+### Issuing a token
+
+- `dbo.AppUser.PasswordHash` is the **lowercase hex SHA-256** of the plain password (`PasswordHasher`
+  in `Infrastructure\`). `Matches` decodes both sides and compares with
+  `CryptographicOperations.FixedTimeEquals`, so hex casing is irrelevant and the comparison does not
+  leak a prefix; a stored value that is not 32 bytes of hex never matches.
+- Unknown UserId, `IsActive = 0` and a wrong password all return the **same** 401 `ProblemDetails`
+  (`帳號或密碼錯誤。`). `AuthRepository` deliberately does **not** filter on `IsActive` — the
+  controller checks it, so every failure takes one code path and cannot diverge in message or timing.
+- `AppUserCredential` is internal: it carries `PasswordHash` and must never be returned. The wire
+  shape is `LoginResponse` (`userId`, `userName`, `accessToken`) and nothing else.
+- The JWT signing secret is the `symmetricSecurityKey` property of the JSON in
+  `dbo.SysConfig` where `configKey = 'appConfig'`, read through `ISysConfigRepository` on **every**
+  login so a rotated secret needs no restart. Never hard-code it and never move it into
+  `appsettings.json`. HS256 needs ≥ 32 bytes; `JwtTokenService` throws a named
+  `InvalidOperationException` when the row, the property or the length is wrong.
+- Claims: `sub` / `userId` / `userName`, a `jti`, and one **`role`** claim per `dbo.AppUserRole` row.
+  The short `role` name is kept as-is on validation (see below), so `User.IsInRole("Admin")` reads
+  exactly what was issued. Lifetime is `JwtTokenService.TokenLifetime` (24 h) — assert against that
+  constant, never a literal.
+
+### Validating one
+
+- **Closed by default.** `Program.cs` sets an `AuthorizationOptions.FallbackPolicy` of
+  `RequireAuthenticatedUser()`, which applies to every endpoint that declares no policy of its own.
+  A new controller is therefore protected the moment it is routed — there is no `[Authorize]` to
+  remember, and no list of protected routes to keep in step.
+- `AuthController.Login` is the **only** `[AllowAnonymous]` action, and **no type carries the
+  attribute at all**. That distinction matters: a class-level `[AllowAnonymous]` beats an
+  action-level `[Authorize]`, so putting it on the controller would have quietly opened up
+  `PUT /api/auth/profile` the moment it was added. `AuthorizationConventionTests` pins both halves —
+  no anonymous type, and exactly one anonymous action — so opening an endpoint up is a deliberate
+  act.
+- `JwtBearerSetup.Configure` holds the validation parameters: signature and lifetime are checked,
+  issuer and audience are not (the API issues and consumes its own tokens), `ClockSkew` is one
+  minute, and `MapInboundClaims = false` + `RoleClaimType = "role"` keep the short claim names.
+- The validation key is the **same** `symmetricSecurityKey` used to sign, read per request through
+  `IJwtTokenService.GetSigningKeyAsync` — never a hard-coded `IssuerSigningKey`, so rotating the
+  SysConfig row invalidates outstanding tokens without a restart. Because
+  `IssuerSigningKeyResolver` is synchronous and the read is not, `OnMessageReceived` awaits the key
+  and stashes it in `HttpContext.Items`; the resolver hands that back. An anonymous request carries
+  no `Authorization: Bearer` header and so triggers no read at all.
+- Middleware order in `Program.cs`: `UseSwagger` → `UseCors` → `UseAuthentication` →
+  `UseAuthorization` → `MapControllers`. Swagger sits ahead of authorization on purpose — the docs
+  are how a developer gets a token in the first place — and its `AddSecurityDefinition` lets the UI
+  send one.
+- No endpoint gates on a **role** yet. `[Authorize(Roles = "Admin")]` works if one needs to; today
+  the roles only drive what the Angular sidebar shows.
+
+### Acting on the caller
+
+`PUT /api/auth/profile` (個人資料) is the pattern for an endpoint that writes the **signed-in user's
+own** row. Copy it rather than inventing a shape.
+
+- The key comes from `User.FindFirstValue(JwtTokenService.UserIdClaimType)` — the validated token's
+  `userId` claim, with `sub` as a fallback — and **never** from the request. No route param either:
+  a caller has nothing to pass.
+- The request DTO carries **only the editable columns**. `UpdateProfileRequest` has one property,
+  `UserName`; there is no `UserId` and no role list, so a body that sends them has nothing to bind
+  to and System.Text.Json drops them. That is what makes "a userId in the body is ignored" true, and
+  it is worth a reflection test (`AuthRoutingConventionTests`) so a later property cannot undo it.
+- `[Required]` rejects `null` and `""` but **not** `"   "`, so the action trims and re-checks before
+  it reaches SQL; both paths answer 400 with `ModelState`.
+- The repository's UPDATE names one column. `AuthRepository.UpdateUserNameAsync` sets `UserName` and
+  nothing else — not the key, not `IsActive`, not `PasswordHash` — and never touches
+  `dbo.AppUserRole`, so 個人資料 cannot become a privilege-escalation path. It returns the row
+  re-read **inside** the transaction, or `null` when no row matched (→ 404: the token validated but
+  its account is gone).
+- The response is its own narrow model. `UserProfileResponse` is `{ UserId, UserName }`: no
+  PasswordHash, and no roles either — those ride in the token's `role` claims, so a rename does not
+  re-issue one and nothing about the caller's authority changes.
