@@ -22,8 +22,10 @@ This file holds only what every task needs. The detail lives in `docs\` — read
 ```
 database\            auth.sql (AppRole/AppUser/AppUserRole/SysConfig), admin.sql (those four plus PublishStatus/RowAudit), course.sql, promotion.sql
 spec\                code-gen.convention.md (authoritative), feature-spec.template.md, sample1/2.spec.md, ui-sample-*.png
-spec\{sub-system}\   per-feature build specs written by the /crud skill, e.g. spec\admin\PublishStatus.md, spec\course\Course.md
+spec\{sub-system}\   per-feature build specs, e.g. spec\admin\PublishStatus.md, spec\course\Course.md, spec\promotion\FeaturedPromoItem.md (written by /crud, or by hand for a custom page)
+spec\custom\{Table}\ hand-written functional spec + ui-*.spec.png mock-ups for a page that is not the list/detail/form triple — the input to a custom build
 docs\                on-demand reference for this guide (see table above)
+.claude\skills\crud\ the /crud skill: schema → spec → build (untracked)
 global.json          pins .NET SDK 9.0.316 (SDK 10 is also installed — do not let templates target net10.0)
 src\CMS.sln          CMS.API + CMS.API.Tests
 src\CMS.API\         Models\ Repositories\ Controllers\ Infrastructure\
@@ -70,7 +72,7 @@ Karma needs a browser: `$env:CHROME_BIN = "C:\Program Files\Google\Chrome\Applic
 
 ## Adding the next feature
 
-1. Read the table in `database\*.sql`: PK type (**IDENTITY or not**), FKs, n-n junctions, nullable columns, tables that FK into it. `/crud TABLE=… SUB_SYSTEM=…` writes `spec\{sub-system}\{Table}.md` first, then builds from it.
+1. Read the table in `database\*.sql`: PK type (**IDENTITY or not**), FKs, n-n junctions, nullable columns, UNIQUE natural keys, tables that FK into it. `/crud TABLE=… SUB_SYSTEM=…` writes `spec\{sub-system}\{Table}.md` first, then builds from it. A **custom page** starts from `spec\custom\{Table}\` instead: read its spec and mock-ups, then write the build spec yourself (`spec\promotion\FeaturedPromoItem.md` is the model) before coding.
 2. Backend: models → repository (+ interface) → controller → `Program.cs` → lookup endpoint if it is an FK target. Read `docs\backend.md` first.
 3. Backend tests: in-memory fake + controller tests for list, filter, view, add, edit, delete, not-found / duplicate / still-referenced. Give the fake a seam for what memory cannot do (`MarkInUse`).
 4. Frontend: models → service → list/detail/form → routes → `app.routes.ts` → `NAV_GROUPS`. Read `docs\frontend.md` first. Defer link buttons whose target route does not exist; record them in the spec.
