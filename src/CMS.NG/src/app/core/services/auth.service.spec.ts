@@ -6,7 +6,7 @@ import { environment } from '@environments/environment';
 import { AuthProfile, UserProfile } from '@core/models';
 import { fakeAccessToken, fakeProfile, signIn } from '@core/testing/auth.testing';
 
-import { AUTH_SESSION_KEY, AuthService } from './auth.service';
+import { AUTH_SESSION_KEY, AuthService, FORCE_PASSWORD_CHANGE_ROUTE } from './auth.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -322,6 +322,56 @@ describe('AuthService', () => {
     expect(sessionStorage.getItem(AUTH_SESSION_KEY)).toBeNull();
     // A signed-out session must not leave the next user looking at the previous one's filters.
     expect(sessionStorage.getItem('course-list-filters')).toBeNull();
+  });
+
+  // ---------- 預設密碼 ----------
+
+  it('reads no default-password flag from an ordinary session', () => {
+    signIn(['Admin']);
+    create();
+
+    expect(service.mustChangePassword()).toBeFalse();
+    expect(service.requiresPasswordChange()).toBeFalse();
+  });
+
+  it('reads the flag from a token that carries it', () => {
+    signIn(['Admin'], 'Admin User', true);
+    create();
+
+    expect(service.mustChangePassword()).toBeTrue();
+    expect(service.requiresPasswordChange()).toBeTrue();
+  });
+
+  it('is not flagged when nobody is signed in', () => {
+    create();
+
+    expect(service.mustChangePassword()).toBeFalse();
+    expect(service.requiresPasswordChange()).toBeFalse();
+  });
+
+  it('sets both the signal and the storage read when a flagged login is stored', () => {
+    create();
+
+    service.login({ userId: 'admin@example.com', password: 'CMS4fun#' }).subscribe();
+    httpMock.expectOne(loginUrl).flush(fakeProfile(['Admin'], 'Admin User', true));
+
+    expect(service.mustChangePassword()).toBeTrue();
+    expect(service.requiresPasswordChange()).toBeTrue();
+  });
+
+  it('answers requiresPasswordChange from storage, not from a cached signal', () => {
+    signIn(['Admin']);
+    create();
+    expect(service.requiresPasswordChange()).toBeFalse();
+
+    // Another tab replaces the session. The guard's question must see it without a new instance.
+    signIn(['Admin'], 'Admin User', true);
+
+    expect(service.requiresPasswordChange()).toBeTrue();
+  });
+
+  it('names the forced page', () => {
+    expect(FORCE_PASSWORD_CHANGE_ROUTE).toBe('/change-password');
   });
 
   it('survives session storage being unavailable', () => {

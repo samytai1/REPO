@@ -55,7 +55,8 @@ public class AuthControllerTests
         return new AuthController(
             repository ?? SeededRepository(),
             new JwtTokenService(config),
-            new PasswordPolicyService(config));
+            new PasswordPolicyService(config),
+            new DefaultPasswordService(config));
     }
 
     private static LoginRequest Login(string userId, string password)
@@ -320,12 +321,140 @@ public class AuthControllerTests
 
         var response = AssertOk(await controller.Login(Login("admin@example.com", "CMS4fun#"), CancellationToken.None));
 
-        // The payload is only base64url-encoded, so inspect the decoded claims themselves.
-        var claims = Read(response.AccessToken).Claims.Select(c => $"{c.Type}={c.Value}").ToList();
+        // The payload is only base64url-encoded, so inspect the decoded claims themselves. The
+        // 預設密碼 flag is excluded by *type* before the substring scan: its name legitimately
+        // contains "Password" while carrying no password material at all, and its value is asserted
+        // separately below.
+        var claims = Read(response.AccessToken).Claims
+            .Where(c => c.Type != JwtTokenService.MustChangePasswordClaimType)
+            .Select(c => $"{c.Type}={c.Value}")
+            .ToList();
 
         Assert.DoesNotContain(claims, c => c.Contains("password", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(claims, c => c.Contains(storedHash, StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(claims, c => c.Contains("CMS4fun#", StringComparison.Ordinal));
+
+        // The excluded claim is a bare boolean marker and nothing more.
+        Assert.All(
+            ClaimValues(Read(response.AccessToken), JwtTokenService.MustChangePasswordClaimType),
+            value => Assert.Equal("true", value));
+    }
+
+    // ---------- 預設密碼 mustChangePassword ----------
+
+    // The seeded fixtures already give both cases for free: AppConfigJson's defaultPassword is
+    // "CMS4fun#", which is admin's password and not helen's.
+
+    [Fact]
+    public async Task Login_WhenThePasswordIsTheConfiguredDefault_IssuesATokenCarryingTheFlag()
+    {
+        var controller = ControllerFor();
+
+        var response = AssertOk(await controller.Login(Login("admin@example.com", "CMS4fun#"), CancellationToken.None));
+
+        // Pins the exact wire form — the string "true", not a JSON boolean. The browser's decoder
+        // reads this shape.
+        Assert.Equal(
+            "true",
+            Assert.Single(ClaimValues(Read(response.AccessToken), JwtTokenService.MustChangePasswordClaimType)));
+    }
+
+    [Fact]
+    public async Task Login_WhenThePasswordIsNotTheDefault_OmitsTheClaimEntirely()
+    {
+        var controller = ControllerFor();
+
+        var response = AssertOk(await controller.Login(Login("helen", "helen-pw"), CancellationToken.None));
+
+        // Absence, not "false": a token issued before this feature existed must read the same way.
+        Assert.Empty(ClaimValues(Read(response.AccessToken), JwtTokenService.MustChangePasswordClaimType));
+    }
+
+    [Fact]
+    public async Task Login_WithNoDefaultPasswordConfigured_FlagsNobody()
+    {
+        var sysConfig = new InMemorySysConfigRepository()
+            .Seed("appConfig", PolicyOffConfigJson);
+        var controller = ControllerFor(sysConfig: sysConfig);
+
+        var response = AssertOk(await controller.Login(Login("admin@example.com", "CMS4fun#"), CancellationToken.None));
+
+        Assert.Empty(ClaimValues(Read(response.AccessToken), JwtTokenService.MustChangePasswordClaimType));
+    }
+
+    [Fact]
+    public async Task Login_TheFlagDoesNotDisturbTheRoleClaims()
+    {
+        var controller = ControllerFor();
+
+        var response = AssertOk(await controller.Login(Login("admin@example.com", "CMS4fun#"), CancellationToken.None));
+
+        var token = Read(response.AccessToken);
+        Assert.Equal(new[] { "Admin", "User" }, ClaimValues(token, JwtTokenService.RoleClaimType));
+        Assert.Single(ClaimValues(token, JwtTokenService.MustChangePasswordClaimType));
+    }
+
+    /// <summary>
+    /// The rule that makes the forced flow airtight, for free: a flagged user's stored hash *is* the
+    /// default's hash, so "same as the current one" is exactly "still the default". No extra check
+    /// inside ChangePassword is needed — which is why this test must not be deleted as a duplicate.
+    /// </summary>
+    [Fact]
+    public async Task ChangePassword_ForAUserOnTheDefaultPassword_RefusesToKeepIt()
+    {
+        var controller = SignedInAs(SeededRepository(), "admin@example.com");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", "CMS4fun#"), CancellationToken.None);
+
+        Assert.Equal("新密碼不可與目前密碼相同。", AssertRejected(result).Detail);
+    }
+
+    [Fact]
+    public async Task ChangePassword_ForAUserOnTheDefaultPassword_ThenLoginIssuesAnUnflaggedToken()
+    {
+        // The whole round trip, and the single most valuable assertion in the feature: the flag is
+        // gone the moment the password is, because it is re-decided at each login.
+        var repository = SeededRepository();
+        var sysConfig = new InMemorySysConfigRepository().Seed("appConfig", AppConfigJson);
+
+        var flagged = AssertOk(await ControllerFor(repository, sysConfig)
+            .Login(Login("admin@example.com", "CMS4fun#"), CancellationToken.None));
+        Assert.Single(ClaimValues(Read(flagged.AccessToken), JwtTokenService.MustChangePasswordClaimType));
+
+        var changer = SignedInAsWith(repository, sysConfig, "admin@example.com");
+        Assert.IsType<NoContentResult>(
+            await changer.ChangePassword(Change("CMS4fun#", "N3wP@ssw0rd"), CancellationToken.None));
+
+        var after = AssertOk(await ControllerFor(repository, sysConfig)
+            .Login(Login("admin@example.com", "N3wP@ssw0rd"), CancellationToken.None));
+
+        Assert.Empty(ClaimValues(Read(after.AccessToken), JwtTokenService.MustChangePasswordClaimType));
+    }
+
+    /// <summary>
+    /// The two switches are independent, and deliberately so: with enforcePasswordPolicy off, a
+    /// forced user may move from the default to something just as weak and be unflagged. Documented
+    /// rather than special-cased — the policy owns strength, this feature owns "not the shared one".
+    /// </summary>
+    [Fact]
+    public async Task ChangePassword_WithThePolicyOff_LetsAForcedUserPickAWeakPassword_AndThatClearsTheFlag()
+    {
+        var repository = SeededRepository();
+        var sysConfig = new InMemorySysConfigRepository().Seed("appConfig", $$"""
+        {
+          "defaultPassword": "CMS4fun#",
+          "symmetricSecurityKey": "{{SigningKey}}",
+          "enforcePasswordPolicy": false
+        }
+        """);
+
+        Assert.IsType<NoContentResult>(await SignedInAsWith(repository, sysConfig, "admin@example.com")
+            .ChangePassword(Change("CMS4fun#", "x"), CancellationToken.None));
+
+        var after = AssertOk(await ControllerFor(repository, sysConfig)
+            .Login(Login("admin@example.com", "x"), CancellationToken.None));
+
+        Assert.Empty(ClaimValues(Read(after.AccessToken), JwtTokenService.MustChangePasswordClaimType));
     }
 
     // ---------- Hashing ----------

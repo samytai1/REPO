@@ -35,6 +35,19 @@ public class TestApiFactory : WebApplicationFactory<Program>
     public const string AdminUserName = "Admin User";
     public const string AdminPassword = "CMS4fun#";
 
+    /// <summary>
+    /// The shared default seeded into <c>appConfig.defaultPassword</c>. It **must not** equal
+    /// <see cref="AdminPassword"/>: admin is the user almost every test here signs in as, and a
+    /// flagged token answers 403 to everything but PUT /api/auth/password. Tidying the two back
+    /// together takes half this suite down.
+    /// </summary>
+    public const string DefaultPassword = "CMS-default#1";
+
+    /// <summary>The one seeded account still sitting on <see cref="DefaultPassword"/>. No roles.</summary>
+    public const string StaleUserId = "stale@example.com";
+
+    public const string StaleUserName = "Stale User";
+
     /// <summary>A protected route whose repository this factory seeds, so an authorized call really returns data.</summary>
     public const string ProtectedRoute = "/api/publish-statuses";
 
@@ -42,7 +55,8 @@ public class TestApiFactory : WebApplicationFactory<Program>
 
     public InMemoryAuthRepository Users { get; } = new InMemoryAuthRepository()
         .Seed(AdminUserId, AdminUserName, AdminPassword, true, "Admin", "User")
-        .Seed("helen", "Helen Wu", "helen-pw");
+        .Seed("helen", "Helen Wu", "helen-pw")
+        .Seed(StaleUserId, StaleUserName, DefaultPassword);
 
     public InMemoryPublishStatusRepository PublishStatuses { get; } = new InMemoryPublishStatusRepository()
         .Seed(1, "草稿", true, false, false)
@@ -58,9 +72,16 @@ public class TestApiFactory : WebApplicationFactory<Program>
     /// row per call, so the change takes effect on the very next request — no restart.
     /// </summary>
     public void RotateSigningKey(string secret)
+        => SeedAppConfig(secret, DefaultPassword);
+
+    /// <summary>
+    /// Rewrites the whole appConfig row. A separate <paramref name="defaultPassword"/> is what the
+    /// 預設密碼 tests rotate, to prove the flag is decided per **login** rather than per request.
+    /// </summary>
+    public void SeedAppConfig(string secret, string defaultPassword)
         => SysConfig.Seed(JwtTokenService.AppConfigKey, $$"""
         {
-          "defaultPassword": "CMS4fun#",
+          "defaultPassword": "{{defaultPassword}}",
           "symmetricSecurityKey": "{{secret}}"
         }
         """);
@@ -110,9 +131,15 @@ public class TestApiFactory : WebApplicationFactory<Program>
 
     /// <summary>
     /// Mints a token outside the login endpoint — for the cases a real login cannot produce:
-    /// a foreign signing key, or an already-expired lifetime.
+    /// a foreign signing key, an already-expired lifetime, or a 預設密碼 flag attached to an
+    /// account that does not actually carry the default, which is how the middleware is tested
+    /// independently of the login path.
     /// </summary>
-    public static string SignToken(string secret, TimeSpan? lifetime = null, string userId = AdminUserId)
+    public static string SignToken(
+        string secret,
+        TimeSpan? lifetime = null,
+        string userId = AdminUserId,
+        bool mustChangePassword = false)
     {
         var expires = DateTime.UtcNow.Add(lifetime ?? JwtTokenService.TokenLifetime);
 
@@ -120,13 +147,20 @@ public class TestApiFactory : WebApplicationFactory<Program>
         // exp, or the handler refuses to create the token at all.
         var issuedAt = expires <= DateTime.UtcNow ? expires.AddMinutes(-1) : DateTime.UtcNow;
 
+        List<System.Security.Claims.Claim> claims =
+        [
+            new(JwtRegisteredClaimNames.Sub, userId),
+            new(JwtTokenService.UserIdClaimType, userId)
+        ];
+
+        if (mustChangePassword)
+        {
+            claims.Add(new System.Security.Claims.Claim(JwtTokenService.MustChangePasswordClaimType, "true"));
+        }
+
         return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
-            Subject = new System.Security.Claims.ClaimsIdentity(
-            [
-                new(JwtRegisteredClaimNames.Sub, userId),
-                new(JwtTokenService.UserIdClaimType, userId)
-            ]),
+            Subject = new System.Security.Claims.ClaimsIdentity(claims),
             IssuedAt = issuedAt,
             NotBefore = issuedAt,
             Expires = expires,

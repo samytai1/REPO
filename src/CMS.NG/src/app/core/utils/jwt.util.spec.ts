@@ -1,4 +1,10 @@
-import { ROLE_CLAIM, decodeJwtPayload, rolesFromToken } from './jwt.util';
+import {
+  MUST_CHANGE_PASSWORD_CLAIM,
+  ROLE_CLAIM,
+  decodeJwtPayload,
+  mustChangePasswordFromToken,
+  rolesFromToken,
+} from './jwt.util';
 
 /** Encodes a payload the way a real JWT does: base64url, no padding, with a fake signature. */
 function tokenFor(payload: Record<string, unknown>): string {
@@ -56,6 +62,35 @@ describe('jwt.util', () => {
 
     it('ignores non-string entries in the role claim', () => {
       expect(rolesFromToken(tokenFor({ [ROLE_CLAIM]: ['Admin', 7, null] }))).toEqual(['Admin']);
+    });
+  });
+
+  describe('mustChangePasswordFromToken', () => {
+    it('reads the string "true" the API actually emits', () => {
+      expect(mustChangePasswordFromToken(tokenFor({ [MUST_CHANGE_PASSWORD_CLAIM]: 'true' }))).toBeTrue();
+      expect(mustChangePasswordFromToken(tokenFor({ [MUST_CHANGE_PASSWORD_CLAIM]: 'TRUE' }))).toBeTrue();
+    });
+
+    it('also reads a JSON boolean, so switching the wire form could not unflag everyone', () => {
+      expect(mustChangePasswordFromToken(tokenFor({ [MUST_CHANGE_PASSWORD_CLAIM]: true }))).toBeTrue();
+    });
+
+    it('treats an absent claim as not flagged, which is how the API says "no"', () => {
+      expect(mustChangePasswordFromToken(tokenFor({ sub: 'helen' }))).toBeFalse();
+    });
+
+    it('is false for every other value', () => {
+      for (const claim of ['false', false, '', 0, 'yes', {}, [], null]) {
+        expect(mustChangePasswordFromToken(tokenFor({ [MUST_CHANGE_PASSWORD_CLAIM]: claim })))
+          .withContext(JSON.stringify(claim))
+          .toBeFalse();
+      }
+    });
+
+    it('is false for a missing or unreadable token', () => {
+      expect(mustChangePasswordFromToken(null)).toBeFalse();
+      expect(mustChangePasswordFromToken(undefined)).toBeFalse();
+      expect(mustChangePasswordFromToken('garbage')).toBeFalse();
     });
   });
 });

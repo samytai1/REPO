@@ -9,8 +9,8 @@ code in that area**, not after something breaks.
 
 | Read | Before |
 |------|--------|
-| `docs\backend.md` | a model, repository or controller — PK kinds (IDENTITY vs user-supplied), FK nav objects / multi-map, n-n junctions, delete-409, lookup-only repositories, routes, model binding, **login / JWT**, **an endpoint that acts on the caller** |
-| `docs\frontend.md` | a list / detail / form page or a service — drawer and tri-state filters, in-place cell editing, form defaults, dates, nullable-FK selects, routing, styling, **the signed-in session, the user menu and 個人資料** |
+| `docs\backend.md` | a model, repository or controller — PK kinds (IDENTITY vs user-supplied), FK nav objects / multi-map, n-n junctions, delete-409, lookup-only repositories, routes, model binding, **login / JWT**, **an endpoint that acts on the caller**, **an authorization policy or requirement** |
+| `docs\frontend.md` | a list / detail / form page or a service — drawer and tri-state filters, in-place cell editing, form defaults, dates, nullable-FK selects, routing, styling, **the signed-in session, the user menu, 個人資料 and the forced 變更密碼** |
 | `docs\testing.md` | tests — fake semantics, per-suite checklists, and the gotchas that already bit once |
 | `docs\environment.md` | fighting the toolchain — PrimeNG licence banner, stale Vite bundle, locked `bin\`, budgets, connection string, `sqlcmd` |
 | `spec\{sub-system}\{Table}.md` | touching that feature — its build spec, deferred links, migration notes |
@@ -30,7 +30,7 @@ src\CMS.sln          CMS.API + CMS.API.Tests
 src\CMS.API\         Models\ Repositories\ Controllers\ Infrastructure\
 src\CMS.API.Tests\   xUnit; Fakes\ holds in-memory repositories
 src\CMS.NG\          Angular app — src\app\{core,shared,features}\; core\ holds models, services, guards, interceptors, utils, testing
-                     features\ is one folder per feature; auth\login and profile\ are single pages, not list/detail/form triples
+                     features\ is one folder per feature; auth\login, auth\force-password-change and profile\ are single pages, not triples
 ```
 
 ## Commands
@@ -56,7 +56,7 @@ Copy the closest one rather than inventing a shape:
 | `Partner` | IDENTITY key, nullable column, derived tri-state filter |
 | `Course` | three FK nav objects via multi-map, two n-n, `date`/`decimal`/`bit`, lookup-only repositories, in-place cell editing |
 | `FeaturedPromoItem` | the one **custom** page — weekly grid + inline form instead of list/detail/form (`spec\promotion\FeaturedPromoItem.md`) |
-| `Auth` | the **non-CRUD** endpoints and the one public page — `POST /api/auth/login` (SHA-256 credential check, JWT signed with a secret read from `dbo.SysConfig`), `PUT /api/auth/profile` and `PUT /api/auth/password` (個人資料: the signed-in user renames themselves and changes their own password), plus bearer validation, the login page, the interceptors, the guard, the header user menu and the role-gated sidebar. Build history in `spec\auth\Auth.md`; the behavioural contract, enforcement matrix and residual risks in `spec\auth\auth-authz.spec.md` |
+| `Auth` | the **non-CRUD** endpoints and the one public page — `POST /api/auth/login` (SHA-256 credential check, JWT signed with a secret read from `dbo.SysConfig`), `PUT /api/auth/profile` and `PUT /api/auth/password` (個人資料: the signed-in user renames themselves and changes their own password), plus bearer validation, the login page, the interceptors, the guards, the header user menu and the role-gated sidebar. Also the reference for an **authorization requirement**: the 預設密碼 forced change — an `IAuthorizationRequirement` + handler + `IAuthorizationMiddlewareResultHandler`, two named policies, and the one action that is exempt from one of them. Build history in `spec\auth\Auth.md`; the behavioural contract, enforcement matrix and residual risks in `spec\auth\auth-authz.spec.md` |
 
 ## Invariants
 
@@ -70,14 +70,18 @@ Silently wrong if you guess; the details are in `docs\`.
 - Dates convert in **local** time via `core\utils\date.util.ts` — never `toISOString().split('T')[0]`.
 - Secrets live in `dbo.SysConfig` (`configKey = 'appConfig'`) and are read at runtime — never hard-coded, never in `appsettings.json`.
 - A login failure is one generic 401 whatever went wrong, and `PasswordHash` never reaches a response model.
-- **The API is closed by default**: a global fallback policy requires an authenticated user, and `AuthController.Login` is the only `[AllowAnonymous]` **action**. No *type* carries the attribute — a class-level `[AllowAnonymous]` beats an action-level `[Authorize]`, so it would silently open up every action added beside it. A new controller needs no `[Authorize]` — and must not opt out.
+- **The API is closed by default**, in two halves. `AuthPolicies.PasswordNotDefault` = authenticated **and** not still on the 預設密碼, and it is set as **both** `FallbackPolicy` and `DefaultPolicy`. A new controller needs no `[Authorize]` — and must not opt out.
+- **Both policies, because an attribute opts out of the fallback.** `FallbackPolicy` covers an endpoint with no `[Authorize]` at all; a **bare `[Authorize]`** bypasses it and combines `DefaultPolicy` instead — and so does `[Authorize(Roles = …)]`, which is the trap waiting for the first role gate. Write one as `[Authorize(Policy = AuthPolicies.PasswordNotDefault, Roles = "Admin")]`; a convention test fails the build otherwise.
+- **Two exemptions in the whole API, each scoped to one action.** `AuthController.Login` is the only `[AllowAnonymous]`, and `AuthController.ChangePassword` the only `PasswordChangeExempt` — without which a flagged user would be 403'd out of the endpoint that clears the flag. No *type* carries either: a class-level `[AllowAnonymous]` beats an action-level `[Authorize]`, so it would silently open up every action added beside it.
+- **An account still on `SysConfig.defaultPassword` gets a `mustChangePassword` token and a 403 everywhere but `PUT /api/auth/password`.** Decided at **login** from the *stored hash*; the flag is emitted only when true, as the string `"true"`. `DefaultPasswordService` **fails open** — the one place in the auth code that does, because failing closed would 403 every account at once. The token is not re-issued, so the browser signs the user out after a successful forced change.
 - The bearer validation key is the **same** SysConfig secret used to sign, re-read per request. Never a hard-coded `IssuerSigningKey`.
 - The signed-in profile lives in **session** storage (`cms-auth`), never local storage; signing out — or any 401 — clears the whole of it and returns to `/login`.
 - Roles come from the token's `role` claims, never a second API call. They gate what the sidebar **shows** — and that is currently their only effect.
-- **No endpoint gates on a role.** The fallback policy checks *authentication*, not authority: there is no `[Authorize(Roles = …)]` anywhere, so any signed-in user can call every CRUD route — including `PUT /api/app-roles`, whose `UserIds` rewrites `dbo.AppUserRole` and can therefore grant Admin. Hiding a menu group hides nothing. When you add a role gate, add it **server-side first**; a guard or a hidden menu is not a control. See `spec\auth\auth-authz.spec.md` §5.3.
+- **No endpoint gates on a role.** The global policy checks *authentication* and *password freshness*, never authority: there is no `[Authorize(Roles = …)]` anywhere, so any signed-in user can call every CRUD route — including `PUT /api/app-roles`, whose `UserIds` rewrites `dbo.AppUserRole` and can therefore grant Admin. Hiding a menu group hides nothing. When you add a role gate, add it **server-side first**; a guard or a hidden menu is not a control. See `spec\auth\auth-authz.spec.md` §5.3.
 - An endpoint that acts **on the caller** reads its UserId from the token's `userId` claim, never from the request — and its DTO has no property for a key or a role list, so a body cannot name another account.
 - **Only `/api/auth/login` may answer 401 for a bad password.** Everywhere else a 401 means "session expired" to `authErrorInterceptor`, which signs the user out — so a rejected 變更密碼 (wrong current password, weak new one) is a **400** carrying the reason in `ProblemDetails.detail`.
-- Password rules live in `enforcePasswordPolicy` (SysConfig), read per request and **failing closed**: an unreadable config keeps the rules on. The server owns them; the browser checks only "filled in" and "both entries match" and shows the server's message.
+- Password rules live in `enforcePasswordPolicy` (SysConfig), read per request and **failing closed**: an unreadable config keeps the rules on. The server owns them; the browser checks only "filled in" and "both entries match" and shows the server's message. Note the deliberate asymmetry: `defaultPassword`, in the same JSON row, fails **open**.
+- Every feature route carries `canActivate: [authGuard, passwordChangeGuard]`. `/change-password` is the exception and carries `unflaggedAwayFromForceGuard` **instead** — giving it both would redirect a flagged user to the page they are already on, and the `**` fallback turns that into a loop.
 - A feature is done only when `dotnet test` **and** `ng test --watch=false` both pass.
 
 ## Adding the next feature
@@ -86,6 +90,6 @@ Silently wrong if you guess; the details are in `docs\`.
 2. **Spec first.** `/crud TABLE=… SUB_SYSTEM=…` writes `spec\{sub-system}\{Table}.md`, then builds from it. A custom page starts from `spec\custom\{Table}\` — read its spec and mock-ups, then write the build spec by hand (`spec\promotion\FeaturedPromoItem.md` is the model).
 3. **Backend:** models → repository (+ interface) → controller → `Program.cs` → lookup endpoint if it is an FK target.
 4. **Backend tests:** in-memory fake + controller tests for list, filter, view, add, edit, delete, not-found / duplicate / still-referenced.
-5. **Frontend:** models → service → list/detail/form → `{table-plural}.routes.ts` → `app.routes.ts` (**with `canActivate: [authGuard]`**) → `NAV_GROUPS`. Defer link buttons whose target route does not exist and record them in the spec.
+5. **Frontend:** models → service → list/detail/form → `{table-plural}.routes.ts` → `app.routes.ts` (**with `canActivate: [authGuard, passwordChangeGuard]`** — both, in that order) → `NAV_GROUPS`. Defer link buttons whose target route does not exist and record them in the spec.
 6. **Frontend tests:** service HTTP contract + one spec per component.
 7. **Verify for real:** both suites, then run both apps and exercise the CRUD path against the database.

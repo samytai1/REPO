@@ -1,4 +1,3 @@
-import { HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
 import {
   AbstractControl,
@@ -13,6 +12,7 @@ import { TagModule } from 'primeng/tag';
 import { MessageService } from 'primeng/api';
 
 import { AuthService } from '@core/services';
+import { problemDetail } from '@core/utils/problem-detail.util';
 
 /**
  * 個人資料 My Profile — the signed-in user's own record, and the two things they may change about
@@ -156,7 +156,7 @@ export class Profile {
       },
       error: (error: unknown) => {
         this.changingPassword.set(false);
-        this.passwordError.set(rejectionMessage(error));
+        this.passwordError.set(problemDetail(error, '密碼更新失敗，請稍後再試。'));
       },
     });
   }
@@ -178,19 +178,4 @@ function newPasswordsMatch(group: AbstractControl): ValidationErrors | null {
   const confirmPassword = group.get('confirmPassword')?.value as string | undefined;
 
   return newPassword === confirmPassword ? null : { passwordMismatch: true };
-}
-
-/**
- * The message to show for a refused password change. A 400 carries the server's own reason in
- * `ProblemDetails.detail` — 目前密碼不正確, the strength rule, or "same as the current one" — and
- * that text is written for the user, so it is shown as-is.
- */
-function rejectionMessage(error: unknown): string {
-  if (error instanceof HttpErrorResponse && error.status === 400) {
-    const detail = (error.error as { detail?: unknown } | null)?.detail;
-
-    if (typeof detail === 'string' && detail.trim() !== '') return detail;
-  }
-
-  return '密碼更新失敗，請稍後再試。';
 }

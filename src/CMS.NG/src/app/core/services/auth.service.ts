@@ -10,7 +10,7 @@ import {
   UpdateProfileRequest,
   UserProfile,
 } from '@core/models';
-import { rolesFromToken } from '@core/utils/jwt.util';
+import { mustChangePasswordFromToken, rolesFromToken } from '@core/utils/jwt.util';
 
 /** Session-storage slot holding the signed-in profile. */
 export const AUTH_SESSION_KEY = 'cms-auth';
@@ -20,6 +20,12 @@ export const LOGIN_ROUTE = '/login';
 
 /** 個人資料 — the signed-in user's own page, reached from the app shell's user menu. */
 export const PROFILE_ROUTE = '/profile';
+
+/**
+ * 變更密碼 — the forced page a user on the 預設密碼 is held on. Reached only by being sent there:
+ * a signed-in user who is not flagged bounces straight back off it.
+ */
+export const FORCE_PASSWORD_CHANGE_ROUTE = '/change-password';
 
 /** Where a successful sign-in lands when there is no `returnUrl` to honour. */
 export const DEFAULT_ROUTE = '/featured-promo-items';
@@ -52,6 +58,14 @@ export class AuthService {
 
   /** The roles carried by the current token, in the order the API issued them. */
   readonly roles = computed(() => rolesFromToken(this.signedIn()?.accessToken));
+
+  /**
+   * Whether the current token says this account is still on the 預設密碼. For templates — the shell
+   * hides its chrome on it. A guard must ask {@link requiresPasswordChange} instead.
+   */
+  readonly mustChangePassword = computed(() =>
+    mustChangePasswordFromToken(this.signedIn()?.accessToken),
+  );
 
   /** POST /api/auth/login — on success the profile is stored before the caller sees it. */
   login(request: LoginRequest): Observable<AuthProfile> {
@@ -104,6 +118,15 @@ export class AuthService {
   /** Whether a token is in session storage. This — not the signal — is what the guard asks. */
   hasToken(): boolean {
     return this.token() !== null;
+  }
+
+  /**
+   * The 預設密碼 flag read from **storage**, for the same reason `hasToken` is: another tab may
+   * have replaced the session since this instance last saw it, and a guard must not decide from a
+   * cached signal. The signal above is the template's view of the same fact.
+   */
+  requiresPasswordChange(): boolean {
+    return mustChangePasswordFromToken(this.token());
   }
 
   /** Role names are compared case-insensitively, as SQL Server compares them. */

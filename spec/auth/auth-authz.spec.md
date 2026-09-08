@@ -5,9 +5,9 @@ codebase, read off the implementation rather than off intent. `Auth.md` beside i
 spec** — what was built and why, in the order it was built. This file is the **reference**: the
 contract a caller can rely on, the enforcement points, and the gaps that exist today.
 
-Derived from `9cf6779` plus the uncommitted 變更密碼 work in the tree. Every claim below is
-traceable to a file named in §13. When the code changes, this file is wrong until it is updated —
-§14 lists the things that must not change silently.
+Derived from `0443898` plus the uncommitted 預設密碼 forced-change work in the tree. Every claim
+below is traceable to a file named in §12. When the code changes, this file is wrong until it is
+updated — §13 lists the things that must not change silently.
 
 ---
 
@@ -41,17 +41,24 @@ Only the columns auth actually reads or writes.
 
 ## 3. Configuration and secrets
 
-`dbo.SysConfig['appConfig']` is a JSON document. Two properties are live:
+`dbo.SysConfig['appConfig']` is a JSON document. All three properties are live:
 
 | Property | Read by | Semantics |
 |---|---|---|
 | `symmetricSecurityKey` | `JwtTokenService.GetSigningKeyAsync` | HS256 signing **and** validation key. Must be ≥ 32 bytes; a shorter, absent or malformed value throws a named `InvalidOperationException` |
 | `enforcePasswordPolicy` | `PasswordPolicyService` | Password strength switch. **Fails closed** — missing row, unreadable JSON or absent property all read as *enforced* |
-| `defaultPassword` | **nothing** | Dead configuration |
+| `defaultPassword` | `DefaultPasswordService` | The shared password an administrator writes into `AppUser.PasswordHash` to reset an account. An account still on it is flagged at login (§5.5). **Fails open** — missing row, unreadable JSON, an absent, non-string or blank value all mean *nobody is forced* |
 
-Both live properties are read **per operation**, never cached. Rotating the secret therefore
-invalidates every outstanding token on the next request, with no restart; flipping the policy takes
-effect on the next password change. No secret is compiled in or held in `appsettings.json`.
+> The two fail directions are deliberate and opposite, over the *same* JSON row. A configuration
+> mistake must not switch a protection **off** (the policy), and must not switch a lockout **on**
+> (the default-password check): failing closed there would 403 every account out of the entire API
+> at once. Both service files say so, and `DefaultPasswordServiceTests` asserts the pair together.
+
+Every property is read **per operation**, never cached. Rotating the secret therefore invalidates
+every outstanding token on the next request, with no restart; flipping the policy takes effect on
+the next password change; rotating `defaultPassword` takes effect on the next **login**, because
+that is the only place the flag is decided (§5.5). No secret is compiled in or held in
+`appsettings.json`.
 
 ## 4. Authentication
 
@@ -82,6 +89,7 @@ Verified against a live token. HS256, compact JWS, no encryption.
 | `userName` | `AppUser.UserName` | **Display only, and goes stale** — a rename does not re-issue a token |
 | `jti` | new GUID (`N`) | Not recorded or checked anywhere |
 | `role` | one per `AppUserRole` row | Trimmed, de-duplicated case-insensitively, blanks skipped. Serialises as a bare string for one role, an array for several |
+| `mustChangePassword` | `DefaultPasswordService.IsDefaultAsync` | **Emitted only when true**, and always as the string `"true"`, not a JSON boolean. Absence means "not flagged", so a token minted before the feature reads as unflagged rather than as broken |
 | `iat`, `nbf` | issue time | |
 | `exp` | issue + `JwtTokenService.TokenLifetime` (**24 h**) | Assert against the constant, never a literal |
 
@@ -110,17 +118,35 @@ Middleware order (`Program.cs`): `UseSwagger` → `UseCors` → `UseAuthenticati
 
 ### 5.1 Closed by default
 
-`AuthorizationOptions.FallbackPolicy` = `RequireAuthenticatedUser()`. It applies to every endpoint
-that declares no policy of its own, so a newly routed controller is protected without anyone
+`AuthPolicies.PasswordNotDefault` = `RequireAuthenticatedUser()` + `MustChangePasswordRequirement`,
+and it is set as **both** `AuthorizationOptions.FallbackPolicy` **and**
+`AuthorizationOptions.DefaultPolicy`. A newly routed controller is protected without anyone
 remembering to protect it.
 
-### 5.2 The single exception
+Both, deliberately. The fallback policy applies only to an endpoint carrying **no** `IAuthorizeData`
+at all; an endpoint with a *bare* `[Authorize]` bypasses it and combines the **default** policy
+instead. Setting only the fallback would therefore have left `PUT /api/auth/profile` — which
+carries `[Authorize]` today — exempt from the password half of the rule.
+
+The same escape applies to `[Authorize(Roles = …)]`, which also sets `useDefaultPolicy = false`.
+That matters for the very next change §5.3 asks for, so
+`AuthorizationConventionTests.NoAuthorizeAttribute_EscapesTheDefaultPolicy_ByNamingRolesOrAnUnknownPolicy`
+fails the build for any attribute that names roles without also naming a policy.
+
+### 5.2 The two exceptions
 
 `AuthController.Login` carries `[AllowAnonymous]`. **No type carries it.** This is load-bearing, not
 stylistic: a class-level `[AllowAnonymous]` beats an action-level `[Authorize]`, so putting it on
 `AuthController` would silently expose every action added beside `Login` — which is exactly what
 `profile` and `password` are. `AuthorizationConventionTests` pins both halves (no anonymous type;
 exactly one anonymous action).
+
+There is a **second** exception, of a different kind and also scoped to one action:
+`AuthController.ChangePassword` carries `[Authorize(Policy = AuthPolicies.PasswordChangeExempt)]` —
+authenticated, but with the default-password requirement lifted. Without it a flagged user would be
+403'd out of the one endpoint that clears the flag. `AuthorizationConventionTests` pins it with the
+same exact set equality it uses for `[AllowAnonymous]`: exactly one exempt action in the whole API,
+and it is that one.
 
 Swagger (`/swagger`) is served **unauthenticated and unconditionally**, in every environment — see
 §12.4.
@@ -130,9 +156,10 @@ Swagger (`/swagger`) is served **unauthenticated and unconditionally**, in every
 > **This is the most consequential gap in the system as built.**
 
 Grepping the API for `[Authorize(Roles …)]`, `RequireRole`, `RequireClaim` or `IsInRole` returns
-**nothing**. The only authorization requirement in the application is "be authenticated". Role
-claims are issued, validated and shipped to the browser, where they decide whether the
-`系統管理 Admin` sidebar group is rendered — and that is their entire effect.
+**nothing**. The two authorization requirements in the application are "be authenticated" and "not
+still on the 預設密碼" (§5.4); neither has anything to do with *who* is asking. Role claims are
+issued, validated and shipped to the browser, where they decide whether the `系統管理 Admin` sidebar
+group is rendered — and that is their entire effect.
 
 Two direct consequences, both live today:
 
@@ -144,25 +171,51 @@ Two direct consequences, both live today:
    membership; the next login mints a token carrying `role: Admin`. Nothing in the request path
    checks who is asking.
 
-Established by construction from four facts, each read directly: the fallback policy is the only
-policy; no role check exists anywhere; `AppRolesController` declares no policy of its own; and
+Established by construction from four facts, each read directly: no policy anywhere names a role;
+no role check exists anywhere; `AppRolesController` declares no policy of its own; and
 `AppRoleRequest.UserIds` drives a junction replace. It was not exploited.
 
-Fixing it means gating server-side **first** — `[Authorize(Roles = "Admin")]` on the
-role-and-user-administration endpoints — and only then adding a client-side role guard. A client
-guard alone changes nothing.
+Fixing it means gating server-side **first** on the role-and-user-administration endpoints, and only
+then adding a client-side role guard. A client guard alone changes nothing. Write the attribute as
+`[Authorize(Policy = AuthPolicies.PasswordNotDefault, Roles = "Admin")]`: a bare `Roles` opts the
+endpoint out of the default policy (§5.1), which would make the new role gate the one route a user
+on the 預設密碼 could still reach. `AuthorizationConventionTests` fails the build on that mistake.
 
-### 5.4 Endpoint authorization matrix
+### 5.4 Forced password change
 
-| Endpoint | Anonymous | Any authenticated user | Role required |
-|---|---|---|---|
-| `POST /api/auth/login` | ✅ | ✅ | — |
-| `PUT /api/auth/profile` | ❌ 401 | ✅ own row only | none |
-| `PUT /api/auth/password` | ❌ 401 | ✅ own row only | none |
-| `GET /api/lookups/app-users` | ❌ 401 | ✅ **full user roster** (`userId`, `userName`, `isActive`; no hashes) | none |
-| `PUT /api/app-roles` | ❌ 401 | ✅ **rewrites role membership** (§5.3) | none |
-| Every other CRUD route | ❌ 401 | ✅ full read/write | none |
-| `GET /swagger/**` | ✅ | ✅ | — |
+The one rule the API enforces beyond "be authenticated".
+
+`AuthController.Login` asks `DefaultPasswordService` whether the **stored hash** equals
+`Hash(appConfig.defaultPassword)` — the stored hash, not the submitted password, because the
+credential check has already proved the two match and `PasswordHasher.Matches` is fixed-time and
+hex-case-insensitive. The check runs *after* the credential guard, so a rejected login pays for no
+extra config read. If it answers yes, the issued token carries `mustChangePassword` (§4.3), and
+`MustChangePasswordRequirement` then refuses that token everywhere but `PUT /api/auth/password`.
+
+| Aspect | Behaviour |
+|---|---|
+| Status | **403**, never 401 — a 401 would reach `authErrorInterceptor` and sign the user out instead of sending them to 變更密碼 (§7) |
+| Body | `ProblemDetails` with `請先變更預設密碼。`, written by `PasswordChangeRequiredResultHandler`. The framework's own 403 is bodyless, which would be the one refusal here that does not say why |
+| Decided | Per **login**, not per request. Rotating `defaultPassword` leaves everyone already holding a token exactly as they were |
+| Cleared | By signing in again after the change. The token is **not** re-issued, so the caller stays flagged until they do — which is why the browser signs them out on success |
+| Pre-existing tokens | Carry no claim, so they are **not** flagged and keep full access for up to 24 h. Rotating `symmetricSecurityKey` at deploy kills them all on the next request, needs no restart, and is the rollout step |
+| Terminating on the default | Impossible: 新密碼不可與目前密碼相同。 already refuses it, and for a flagged user "same as current" *is* "still the default" |
+| Interaction with `enforcePasswordPolicy` | None. With the policy off a forced user may pick something weak — the two switches are independent, and each owns one thing |
+
+### 5.5 Endpoint authorization matrix
+
+"Authenticated" below means authenticated **and** not still on the 預設密碼; the 403 column is that
+second half.
+
+| Endpoint | Anonymous | On the default password | Any other authenticated user | Role required |
+|---|---|---|---|---|
+| `POST /api/auth/login` | ✅ | ✅ | ✅ | — |
+| `PUT /api/auth/password` | ❌ 401 | ✅ **the one exemption** | ✅ own row only | none |
+| `PUT /api/auth/profile` | ❌ 401 | ❌ 403 | ✅ own row only | none |
+| `GET /api/lookups/app-users` | ❌ 401 | ❌ 403 | ✅ **full user roster** (`userId`, `userName`, `isActive`; no hashes) | none |
+| `PUT /api/app-roles` | ❌ 401 | ❌ 403 | ✅ **rewrites role membership** (§5.3) | none |
+| Every other CRUD route | ❌ 401 | ❌ 403 | ✅ full read/write | none |
+| `GET /swagger/**` | ✅ | ✅ | ✅ | — |
 
 ## 6. Operations that act on the caller
 
@@ -209,6 +262,7 @@ the whole session and redirects to `/login`. Therefore:
 | Bad credentials at **login** | 401 | The one place a 401 means "wrong password"; the login page shows it |
 | No token / expired / forged / tampered / wrong scheme | 401 | Genuinely expired — signing out is correct |
 | Token with no `userId` claim | 401 | Unusable identity; signing out is correct |
+| **Token flagged `mustChangePassword`**, on anything but 變更密碼 | **403** | Deliberately not a 401: the session is valid, and signing the user out would lose the very page that fixes it. `authErrorInterceptor` ignores a 403 (pinned by `auth-error.interceptor.spec.ts`), so the guards own the redirect — teaching the interceptor about 403 was considered and **rejected**, as a second, racy enforcement path fighting the guard |
 | **Wrong current password** at 變更密碼 | **400** | A 401 would sign the user out over a typo |
 | Weak new password, or same as current | **400** | ditto |
 | Empty / whitespace `userName` | 400 | |
@@ -229,6 +283,9 @@ written to be displayed verbatim.
 | Route guard | `authGuard` returns a `UrlTree` to `/login?returnUrl=…`, so the redirect is one navigation. Convenience only |
 | `returnUrl` | Honoured only if it starts with a single `/` and is not the login page; anything else lands on `DEFAULT_ROUTE` |
 | Password change | Does **not** touch the session — the API keeps the token valid and answers 204 |
+| 預設密碼 flag | Decoded from the token like the roles. `mustChangePassword()` (signal) is for templates; `requiresPasswordChange()` re-reads **storage** and is what the guards ask, for the same reason `hasToken()` does |
+| Forced state | The shell hides its sidebar and header (`showChrome`), `passwordChangeGuard` holds every feature route on `/change-password`, `unflaggedAwayFromForceGuard` keeps everyone else off it, and 登入 sends a flagged sign-in there **ignoring `returnUrl`** |
+| Forced change succeeds | Unlike 個人資料, this one **does** end the session: `clearSession()` then `/login` with 密碼已變更，請重新登入。 The API does not re-issue the token, so the held one still carries the flag |
 
 ## 9. Enforcement matrix
 
@@ -237,6 +294,7 @@ written to be displayed verbatim.
 | Authentication required | ✅ fallback policy | guard (cosmetic) |
 | Identity of the acting user | ✅ token claim | — |
 | Password strength | ✅ `PasswordPolicyService` | hint text only — the flag is invisible to the browser, so the form checks only "filled in" and "both entries match" and shows the server's 400 |
+| Forced password change | ✅ `MustChangePasswordRequirement` → 403 on every endpoint but 變更密碼 | guard + hidden chrome (cosmetic). The server was written first, per §13.5 |
 | New-password confirmation | — (not sent) | ✅ cross-field validator |
 | `UserName` required | ✅ | ✅ |
 | Role-based access | ❌ **nothing** | menu visibility only |
@@ -251,6 +309,16 @@ Each is pinned by a test; breaking one should fail the build, not production.
 | Invariant | Pinned by |
 |---|---|
 | Fallback policy carries `DenyAnonymousAuthorizationRequirement` | `AuthorizationConventionTests` |
+| **Default and fallback policies both** carry `MustChangePasswordRequirement` | `AuthorizationConventionTests` |
+| `ChangePassword` is the only `PasswordChangeExempt` action in the API | `AuthorizationConventionTests` (exact set equality) |
+| No `[Authorize]` escapes the default policy by naming roles or an unknown policy | `AuthorizationConventionTests` |
+| A flagged token is 403 — **asserted not to be 401** — on every route but 變更密碼 | `AuthorizationTests` `[Theory]` |
+| A flagged token may still change its own password, and a fresh login is then unflagged | `AuthorizationTests` |
+| The default-password check fails **open** on every unreadable config shape | `DefaultPasswordServiceTests` |
+| A blank `defaultPassword` does not match `Hash("")` | `DefaultPasswordServiceTests` |
+| The flag is emitted only when true, as the string `"true"` | `AuthControllerTests` |
+| A pre-feature token is not flagged (accepted rollout gap) | `AuthorizationTests` |
+| Every feature route carries both guards; `change-password` carries neither | `password-change.guard.spec.ts` |
 | No controller **type** is `[AllowAnonymous]`; `Login` is the only anonymous **action** | `AuthorizationConventionTests` |
 | `IssuerSigningKey` is null and the resolver is not | `AuthorizationConventionTests` |
 | `MapInboundClaims` off, `RoleClaimType = "role"` | `AuthorizationConventionTests` |
@@ -270,7 +338,9 @@ built.
 
 1. **No server-side role enforcement (§5.3).** Any authenticated user can rewrite role membership
    and escalate to Admin. *Highest-value fix: `[Authorize(Roles = "Admin")]` on role and user
-   administration.*
+   administration* — but note §5.1: a bare `Roles` also escapes the default policy, so it must be
+   written `[Authorize(Policy = AuthPolicies.PasswordNotDefault, Roles = "Admin")]`. A convention
+   test already fails the build otherwise.
 2. **Unsalted SHA-256 password hashes.** Fast and unsalted: a leaked `AppUser` table is offline-
    crackable at high rate, and identical passwords share a digest. Migrating means an algorithm
    marker on the column, verify-against-old, and re-hash on next login — its own piece of work.
@@ -293,9 +363,15 @@ built.
    `AllowCredentials` — fine for development, too broad if the API is ever exposed.
 10. **The token's `userName` claim goes stale** after a rename. Nothing reads it, so this is
     cosmetic today, but it is a trap for anyone who starts to.
-11. **No password reset.** 變更密碼 requires the current password, so a forgotten password needs an
-    administrator and a SQL statement. `SysConfig.defaultPassword` is dead configuration that would
-    seed exactly that flow.
+11. **No *self-serve* password reset.** 變更密碼 still requires the current password, so a forgotten
+    password needs an administrator writing `Hash(defaultPassword)` into `AppUser.PasswordHash`.
+    What is now closed is the half that mattered: that shared secret is single-use, because the
+    account is held on 變更密碼 until it is replaced (§5.4). What remains open is the administrator
+    step itself — there is no token-by-email flow, and no endpoint that performs the reset.
+12. **A flagged user with another tab already open** on a feature page is not pushed off it: guards
+    run on navigation only, and the interceptor ignores 403. They see requests fail with no
+    explanation. Accepted — the server is the control and the page is genuinely unusable, which is
+    the honest outcome; polling or a 403 handler would be worse than the guard alone.
 
 ## 12. Traceability
 
@@ -306,22 +382,30 @@ built.
 | `Infrastructure/JwtTokenService.cs` | Claim set, lifetime, signing-key read, config key names |
 | `Infrastructure/PasswordHasher.cs` | Hash and fixed-time comparison |
 | `Infrastructure/PasswordPolicyService.cs` | Strength rules, `enforcePasswordPolicy`, fail-closed |
+| `Infrastructure/DefaultPasswordService.cs` | `defaultPassword` comparison, fail-**open** |
+| `Infrastructure/AuthPolicies.cs` | The two policy names |
+| `Infrastructure/MustChangePasswordRequirement.cs` | The requirement, its handler, and the 403 message |
+| `Infrastructure/PasswordChangeRequiredResultHandler.cs` | Gives that 403 a Chinese `ProblemDetails` body |
 | `Controllers/AuthController.cs` | The four behaviours and every status code in §7 |
 | `Repositories/AuthRepository.cs` | The only writes to `dbo.AppUser` |
 | `Repositories/SysConfigRepository.cs` | Config read |
 | `core/services/auth.service.ts` | Session ownership, storage-as-source-of-truth |
 | `core/interceptors/*.ts` | Token attachment; 401 → sign-out |
 | `core/guards/auth.guard.ts` | Route gate (cosmetic) |
-| `core/utils/jwt.util.ts` | Unverified claim decode |
+| `core/guards/password-change.guard.ts` | The forced-page gate, both directions (cosmetic) |
+| `core/utils/jwt.util.ts` | Unverified claim decode, roles and the 預設密碼 flag |
+| `core/utils/problem-detail.util.ts` | The 400 → `detail` rule §7 depends on, shared by both password forms |
 | `features/profile/*` | 個人資料 and 變更密碼 |
+| `features/auth/force-password-change/*` | The forced 變更密碼 page |
 
 | Suite | Pins |
 |---|---|
 | `AuthorizationTests` | The real pipeline over HTTP — the only place middleware is exercised |
 | `AuthorizationConventionTests` | The wiring, by reflection and resolved options |
 | `AuthControllerTests` | Behaviour, over in-memory fakes |
+| `DefaultPasswordServiceTests` | The fail-open branches, which `Login` cannot reach — it throws on the signing key first |
 | `AuthRoutingConventionTests` | Route and DTO shapes |
-| `auth.service.spec.ts`, `auth-*.interceptor.spec.ts`, `auth.guard.spec.ts`, `profile.spec.ts` | Client session and forms |
+| `auth.service.spec.ts`, `auth-*.interceptor.spec.ts`, `auth.guard.spec.ts`, `password-change.guard.spec.ts`, `profile.spec.ts`, `force-password-change.spec.ts` | Client session, guards and forms |
 
 ## 13. Rules for changing this area
 
@@ -333,7 +417,10 @@ built.
 4. **Never pin `IssuerSigningKey`.** It would survive a rotation.
 5. **Add the server-side check before the client-side one.** A guard or a hidden menu is not a
    control.
-6. **Secrets stay in `dbo.SysConfig`**, read at runtime — never `appsettings.json`, never compiled
+6. **An endpoint that opts out of the default policy is an exemption.** Action level only, and every
+   addition must update §5.2 — including `[Authorize(Roles = …)]`, which opts out whether or not it
+   means to. A new self-service endpoint must decide, explicitly, which of the two policies it takes.
+7. **Secrets stay in `dbo.SysConfig`**, read at runtime — never `appsettings.json`, never compiled
    in.
-7. A change here is done when `dotnet test` **and** `ng test --watch=false` both pass, and this file
+8. A change here is done when `dotnet test` **and** `ng test --watch=false` both pass, and this file
    still describes the code.

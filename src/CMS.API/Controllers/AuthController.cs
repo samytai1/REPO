@@ -17,6 +17,11 @@ namespace CMS.API.Controllers;
 /// <see cref="Login"/> alone and **not** on the type: a class-level attribute would silently open
 /// up every action added here later, <see cref="UpdateProfile"/> and
 /// <see cref="ChangePassword"/> included.
+///
+/// This controller carries the API's **two** deliberate exceptions, and both are scoped to a single
+/// action. The second is <see cref="ChangePassword"/>: it names
+/// <see cref="AuthPolicies.PasswordChangeExempt"/>, so a user still on the default password can
+/// reach it while every other endpoint answers them 403.
 /// </summary>
 [ApiController]
 [Route("api/auth")]
@@ -26,21 +31,30 @@ public class AuthController : ControllerBase
     private readonly IAuthRepository _repository;
     private readonly IJwtTokenService _tokenService;
     private readonly IPasswordPolicyService _passwordPolicy;
+    private readonly IDefaultPasswordService _defaultPassword;
 
     public AuthController(
         IAuthRepository repository,
         IJwtTokenService tokenService,
-        IPasswordPolicyService passwordPolicy)
+        IPasswordPolicyService passwordPolicy,
+        IDefaultPasswordService defaultPassword)
     {
         _repository = repository;
         _tokenService = tokenService;
         _passwordPolicy = passwordPolicy;
+        _defaultPassword = defaultPassword;
     }
 
     /// <summary>
     /// Signs a user in. The account must exist, be active, and its PasswordHash must equal the
     /// SHA-256 of the supplied password. Every failure returns the same generic 401 so the response
     /// never reveals which check failed.
+    ///
+    /// An account still on the configured <c>defaultPassword</c> gets a token carrying
+    /// <see cref="JwtTokenService.MustChangePasswordClaimType"/>, which makes every endpoint but
+    /// <see cref="ChangePassword"/> answer it 403. <see cref="LoginResponse"/> is unchanged: the
+    /// flag rides in the token exactly as the roles do, so it survives a page reload and there is
+    /// one source of truth.
     /// </summary>
     [AllowAnonymous]
     [HttpPost("login")]
@@ -64,8 +78,12 @@ public class AuthController : ControllerBase
 
         var roleIds = await _repository.GetRoleIdsAsync(credential.UserId, cancellationToken);
 
+        // After the credential guard, so a rejected login never pays for the extra SysConfig read.
+        var mustChangePassword = await _defaultPassword.IsDefaultAsync(
+            credential.PasswordHash, cancellationToken);
+
         var accessToken = await _tokenService.CreateAccessTokenAsync(
-            credential.UserId, credential.UserName, roleIds, cancellationToken);
+            credential.UserId, credential.UserName, roleIds, mustChangePassword, cancellationToken);
 
         return Ok(new LoginResponse
         {
@@ -83,11 +101,14 @@ public class AuthController : ControllerBase
     /// property for a UserId or a role list, so anything of the sort posted alongside is dropped
     /// during deserialization. UserName is required and is trimmed before it reaches SQL.
     /// </summary>
-    [Authorize]
+    [Authorize(Policy = AuthPolicies.PasswordNotDefault)]
     [HttpPut("profile")]
     [ProducesResponseType(typeof(UserProfileResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    // Representative of every endpoint in the API: a caller still on the default password is
+    // refused until they have changed it.
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<UserProfileResponse>> UpdateProfile(
         [FromBody] UpdateProfileRequest request,
@@ -127,8 +148,14 @@ public class AuthController : ControllerBase
     /// The session survives a successful change. Tokens are signed with one global secret and there
     /// is no revocation, so forcing a re-login here would imply an invalidation that does not
     /// actually happen on any other device.
+    ///
+    /// This is the API's one <see cref="AuthPolicies.PasswordChangeExempt"/> action — the deliberate
+    /// escape hatch from <see cref="AuthPolicies.PasswordNotDefault"/>, without which a user on the
+    /// default password would be 403'd out of the very endpoint that clears the flag. The token is
+    /// **not** re-issued, so the caller stays flagged until they sign in again; that is why the
+    /// browser signs them out here rather than leaving them on a token every other route refuses.
     /// </summary>
-    [Authorize]
+    [Authorize(Policy = AuthPolicies.PasswordChangeExempt)]
     [HttpPut("password")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

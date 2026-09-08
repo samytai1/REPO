@@ -13,7 +13,9 @@ import { NAV_GROUPS, NavGroup } from '@shared/layout/nav-menu';
  * Application shell: collapsible sidebar + a header carrying the signed-in user, over the routed
  * content area. Toast and ConfirmDialog hosts live here so every feature page can use them.
  *
- * Signed out — on the login page — the chrome disappears and only the outlet is rendered.
+ * Signed out — on the login page — the chrome disappears and only the outlet is rendered. The same
+ * happens on 變更密碼 while the session is flagged as still using the 預設密碼: every menu entry
+ * there leads somewhere the API would answer 403, so none is shown.
  */
 @Component({
   selector: 'app-root',
@@ -36,6 +38,13 @@ export class App {
   protected readonly brand = 'UUU';
 
   protected readonly signedIn = computed(() => this.auth.profile() !== null);
+
+  /**
+   * Whether to render the sidebar and header. A signed-in user who must still change their 預設密碼
+   * gets the same bare page a signed-out one does — kept separate from `signedIn` rather than folded
+   * into it, because the two really are different states and `app.spec.ts` asserts on both.
+   */
+  protected readonly showChrome = computed(() => this.signedIn() && !this.auth.mustChangePassword());
 
   /** Mirrors the stored profile, so a rename on 個人資料 shows up here without a reload. */
   protected readonly userName = this.auth.userName;

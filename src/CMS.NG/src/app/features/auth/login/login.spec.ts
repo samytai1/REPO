@@ -6,7 +6,7 @@ import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angul
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { environment } from '@environments/environment';
 
-import { AUTH_SESSION_KEY, DEFAULT_ROUTE } from '@core/services';
+import { AUTH_SESSION_KEY, DEFAULT_ROUTE, FORCE_PASSWORD_CHANGE_ROUTE } from '@core/services';
 import { fakeProfile } from '@core/testing/auth.testing';
 
 import { Login } from './login';
@@ -135,6 +135,27 @@ describe('Login', () => {
 
       expect(navigateByUrl).toHaveBeenCalledWith(DEFAULT_ROUTE);
     }
+  });
+
+  it('sends a user still on the default password to 變更密碼', () => {
+    setup();
+    fillIn('admin@example.com', 'CMS4fun#');
+
+    submit();
+    httpMock.expectOne(loginUrl).flush(fakeProfile(['Admin'], 'Admin User', true));
+
+    expect(navigateByUrl).toHaveBeenCalledWith(FORCE_PASSWORD_CHANGE_ROUTE);
+  });
+
+  it('ignores the returnUrl for a user still on the default password', () => {
+    // Every other route would answer that token 403, so the requested page is not somewhere to go.
+    setup({ returnUrl: '/courses/12/edit' });
+    fillIn('admin@example.com', 'CMS4fun#');
+
+    submit();
+    httpMock.expectOne(loginUrl).flush(fakeProfile(['Admin'], 'Admin User', true));
+
+    expect(navigateByUrl).toHaveBeenCalledWith(FORCE_PASSWORD_CHANGE_ROUTE);
   });
 
   it('shows the generic failure message on a 401 and stays put', () => {

@@ -38,9 +38,18 @@ describe('App shell', () => {
     });
   }
 
-  /** Signs the given roles in *before* the shell is built, then renders it. */
-  function render(roles: string[] = ['Admin'], userName = 'Admin User'): ComponentFixture<App> {
-    signIn(roles, userName);
+  /**
+   * Signs the given roles in *before* the shell is built, then renders it.
+   *
+   * `mustChangePassword` is last and defaults to false, so every existing spec keeps asserting the
+   * ordinary signed-in shell.
+   */
+  function render(
+    roles: string[] = ['Admin'],
+    userName = 'Admin User',
+    mustChangePassword = false,
+  ): ComponentFixture<App> {
+    signIn(roles, userName, mustChangePassword);
 
     configure();
     const fixture = (currentFixture = TestBed.createComponent(App));
@@ -258,6 +267,21 @@ describe('App shell', () => {
     // The chrome goes with the session.
     expect(fixture.nativeElement.querySelector('.app-sidebar')).toBeNull();
     expect(fixture.nativeElement.querySelector('.app-topbar')).toBeNull();
+  });
+
+  // ---------- Still on the default password ----------
+
+  it('renders no sidebar and no header while the session must still change its password', () => {
+    // A session exists, but every menu entry would lead somewhere the API answers 403 — so the
+    // forced page gets the same bare window the login page does.
+    const fixture = render(['Admin'], 'Admin User', true);
+
+    expect(fixture.nativeElement.querySelector('.app-sidebar')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.app-topbar')).toBeNull();
+    expect(navLinks(fixture).length).toBe(0);
+    expect(fixture.nativeElement.querySelector('.app-shell').classList).toContain(
+      'app-shell--anonymous',
+    );
   });
 
   // ---------- Signed out ----------

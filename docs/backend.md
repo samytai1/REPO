@@ -76,17 +76,58 @@ for anything that acts **on the caller**.
   login so a rotated secret needs no restart. Never hard-code it and never move it into
   `appsettings.json`. HS256 needs ≥ 32 bytes; `JwtTokenService` throws a named
   `InvalidOperationException` when the row, the property or the length is wrong.
-- Claims: `sub` / `userId` / `userName`, a `jti`, and one **`role`** claim per `dbo.AppUserRole` row.
+- Claims: `sub` / `userId` / `userName`, a `jti`, one **`role`** claim per `dbo.AppUserRole` row,
+  and `mustChangePassword` when the account is still on the 預設密碼 (below).
   The short `role` name is kept as-is on validation (see below), so `User.IsInRole("Admin")` reads
   exactly what was issued. Lifetime is `JwtTokenService.TokenLifetime` (24 h) — assert against that
   constant, never a literal.
+- `CreateAccessTokenAsync` takes `bool mustChangePassword` as a **required** parameter, not a
+  defaulted one: a default of `false` would let a new call site fail open without saying so. The
+  claim is written **only when true**, and as the string `"true"` rather than a JSON boolean, so an
+  unflagged token is byte-identical to one issued before the flag existed and the browser's decoder
+  has one shape to read.
+
+### 預設密碼 — forcing a password change
+
+- `DefaultPasswordService.IsDefaultAsync` compares the **stored hash** to
+  `Hash(appConfig.defaultPassword)`. The stored hash, not the submitted password: the credential
+  check has already proved they match, and `PasswordHasher.Matches` is fixed-time and
+  hex-case-insensitive, so it is correct for free. Call it **after** the credential guard, so a
+  rejected login pays for no extra config read.
+- It **fails open**, and it is the only thing in the auth code that does: a missing row, unreadable
+  JSON, an absent, non-string or blank value all mean "nobody is forced". Failing closed would flag
+  every account at once and 403 the entire API. `PasswordPolicyService` reads the *same* JSON row
+  and fails **closed** — two opposite failure modes over one document is the confusing part, so both
+  files name each other. The blank check runs **before** the comparison, or `Hash("")` becomes a
+  real target.
+- The flag rides in the token, never in `LoginResponse`. One source of truth, and it survives a
+  page reload exactly as the roles do.
 
 ### Validating one
 
-- **Closed by default.** `Program.cs` sets an `AuthorizationOptions.FallbackPolicy` of
-  `RequireAuthenticatedUser()`, which applies to every endpoint that declares no policy of its own.
-  A new controller is therefore protected the moment it is routed — there is no `[Authorize]` to
-  remember, and no list of protected routes to keep in step.
+- **Closed by default.** `Program.cs` builds `AuthPolicies.PasswordNotDefault` —
+  `RequireAuthenticatedUser()` + `MustChangePasswordRequirement` — and sets it as **both**
+  `AuthorizationOptions.FallbackPolicy` and `AuthorizationOptions.DefaultPolicy`. A new controller
+  is therefore protected the moment it is routed — there is no `[Authorize]` to remember, and no
+  list of protected routes to keep in step.
+- **Why both.** The *fallback* policy applies only to an endpoint carrying no `IAuthorizeData` at
+  all. An endpoint with a **bare `[Authorize]`** bypasses it and combines the *default* policy
+  instead — and so does `[Authorize(Roles = …)]`, which sets `useDefaultPolicy = false` just as
+  `[Authorize(Policy = …)]` does. Setting only the fallback would have left `UpdateProfile` exempt
+  from the password check, and would silently exempt the first role gate anyone adds. Write a future
+  role gate as `[Authorize(Policy = AuthPolicies.PasswordNotDefault, Roles = "Admin")]`;
+  `AuthorizationConventionTests` fails the build otherwise.
+- **`ChangePassword` is the one exemption**, `[Authorize(Policy = AuthPolicies.PasswordChangeExempt)]`
+  — authenticated, requirement lifted. Without it a flagged user would be 403'd out of the endpoint
+  that clears the flag. Like `[AllowAnonymous]`, it is scoped to a single **action** and pinned by
+  exact set equality: exactly one exempt action in the whole API.
+- **A flagged caller gets 403, never 401.** A failed requirement on an already-authenticated
+  principal forbids rather than challenges, which is what makes this safe to add: the Angular
+  `authErrorInterceptor` signs the user out on any 401 outside the login call and explicitly ignores
+  a 403. `PasswordChangeRequiredResultHandler` gives that 403 a `ProblemDetails` body — the
+  framework's own is empty, which would be the one refusal in this API that does not say why. Its
+  handler must **not** call `context.Fail()`: an explicit fail leaves `FailedRequirements` empty,
+  and the result handler could then not tell this rejection from any other.
 - `AuthController.Login` is the **only** `[AllowAnonymous]` action, and **no type carries the
   attribute at all**. That distinction matters: a class-level `[AllowAnonymous]` beats an
   action-level `[Authorize]`, so putting it on the controller would have quietly opened up
@@ -106,8 +147,8 @@ for anything that acts **on the caller**.
   `UseAuthorization` → `MapControllers`. Swagger sits ahead of authorization on purpose — the docs
   are how a developer gets a token in the first place — and its `AddSecurityDefinition` lets the UI
   send one.
-- No endpoint gates on a **role** yet. `[Authorize(Roles = "Admin")]` works if one needs to; today
-  the roles only drive what the Angular sidebar shows.
+- No endpoint gates on a **role** yet; today the roles only drive what the Angular sidebar shows.
+  When one is added, name a policy beside the roles — see "Why both" above.
 
 ### Acting on the caller
 
@@ -161,3 +202,8 @@ own** row. Copy it rather than inventing a shape.
 - **The session deliberately survives.** Tokens are signed with one global secret and there is no
   revocation, so signing the user out here would only imply an invalidation that does not actually
   happen on their other devices.
+- **The forced flow needs no extra check here.** "The new password must differ from the current one"
+  already refuses it: for a user flagged `mustChangePassword`, the stored hash *is* the default's
+  hash, so "same as current" is exactly "still the default". The token is not re-issued either, so
+  the caller stays flagged until they sign in again — which is why the browser signs them out on
+  this one page, and only on this one.

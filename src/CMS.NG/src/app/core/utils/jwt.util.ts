@@ -9,6 +9,12 @@
 /** Claim type carrying each dbo.AppUserRole.RoleId — matches `JwtTokenService.RoleClaimType`. */
 export const ROLE_CLAIM = 'role';
 
+/**
+ * Claim marking an account still on the configured 預設密碼 — matches
+ * `JwtTokenService.MustChangePasswordClaimType`.
+ */
+export const MUST_CHANGE_PASSWORD_CLAIM = 'mustChangePassword';
+
 /** The decoded payload of `token`, or `null` when it is missing or not a readable JWT. */
 export function decodeJwtPayload(token: string | null | undefined): Record<string, unknown> | null {
   if (!token) return null;
@@ -39,6 +45,22 @@ export function rolesFromToken(token: string | null | undefined): string[] {
   if (typeof claim === 'string') return [claim];
 
   return Array.isArray(claim) ? claim.filter((role): role is string => typeof role === 'string') : [];
+}
+
+/**
+ * Whether `token` says its account is still on the default password.
+ *
+ * The API emits the **string** `'true'`, and only when the answer is true — absence is what "not
+ * flagged" looks like, so a token issued before the feature existed reads as false rather than as
+ * broken. The boolean branch exists so that switching the server to a JSON boolean could never
+ * silently unflag everybody; nothing else counts.
+ */
+export function mustChangePasswordFromToken(token: string | null | undefined): boolean {
+  const claim = decodeJwtPayload(token)?.[MUST_CHANGE_PASSWORD_CLAIM];
+
+  if (typeof claim === 'boolean') return claim;
+
+  return typeof claim === 'string' && claim.toLowerCase() === 'true';
 }
 
 /** base64url → UTF-8 text. `atob` only understands base64, and only gives back bytes. */

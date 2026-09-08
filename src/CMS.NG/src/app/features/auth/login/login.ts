@@ -5,7 +5,12 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { MessageService } from 'primeng/api';
 
-import { AuthService, DEFAULT_ROUTE, LOGIN_ROUTE } from '@core/services';
+import {
+  AuthService,
+  DEFAULT_ROUTE,
+  FORCE_PASSWORD_CHANGE_ROUTE,
+  LOGIN_ROUTE,
+} from '@core/services';
 
 /**
  * 登入 Login — the one page outside `authGuard`.
@@ -61,7 +66,11 @@ export class Login {
           summary: '登入成功',
           detail: `歡迎回來，${profile.userName}。`,
         });
-        void this.router.navigateByUrl(this.returnUrl());
+        // A user still on the 預設密碼 goes to 變更密碼 whatever they were headed for: every other
+        // route would answer 403 until they have changed it.
+        void this.router.navigateByUrl(
+          this.auth.mustChangePassword() ? FORCE_PASSWORD_CHANGE_ROUTE : this.returnUrl(),
+        );
       },
       error: () => {
         this.submitting.set(false);

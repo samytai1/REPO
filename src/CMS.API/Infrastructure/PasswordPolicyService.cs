@@ -42,7 +42,9 @@ public class PasswordPolicyService : IPasswordPolicyService
     /// needs no restart — the same rule the signing key follows.
     ///
     /// **Fails closed.** A missing row, unreadable JSON or an absent property all mean "enforced":
-    /// a configuration mistake must not quietly turn the password rules off.
+    /// a configuration mistake must not quietly turn the password rules off. Note the deliberate
+    /// asymmetry with <see cref="DefaultPasswordService"/>, which reads the same JSON row and fails
+    /// **open** — a mistake there must not lock every account out of the API.
     /// </summary>
     private async Task<bool> IsEnforcedAsync(CancellationToken cancellationToken)
     {

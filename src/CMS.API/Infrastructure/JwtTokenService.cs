@@ -28,6 +28,16 @@ public class JwtTokenService : IJwtTokenService
     /// <summary>Claim type carrying each dbo.AppUserRole.RoleId. Maps to <see cref="ClaimTypes.Role"/> on validation.</summary>
     public const string RoleClaimType = "role";
 
+    /// <summary>
+    /// Claim type marking a token whose account is still on the configured default password.
+    ///
+    /// Emitted **only when true**, and always as the string <c>"true"</c> rather than a JSON
+    /// boolean, so it travels exactly as the <c>role</c> claims do and the browser's decoder has one
+    /// shape to read. Absence means "not flagged", so a token minted before this feature existed
+    /// reads as unflagged rather than as broken.
+    /// </summary>
+    public const string MustChangePasswordClaimType = "mustChangePassword";
+
     /// <summary>HMAC-SHA256 needs at least a 256-bit secret.</summary>
     private const int MinimumKeyBytes = 32;
 
@@ -42,6 +52,7 @@ public class JwtTokenService : IJwtTokenService
         string userId,
         string userName,
         IEnumerable<string> roleIds,
+        bool mustChangePassword,
         CancellationToken cancellationToken = default)
     {
         var signingKey = await GetSigningKeyAsync(cancellationToken);
@@ -60,6 +71,12 @@ public class JwtTokenService : IJwtTokenService
             .Select(roleId => roleId.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(roleId => new Claim(RoleClaimType, roleId)));
+
+        // Only ever written when true — absence is what "not flagged" looks like on the wire.
+        if (mustChangePassword)
+        {
+            claims.Add(new Claim(MustChangePasswordClaimType, "true"));
+        }
 
         var issuedAt = DateTime.UtcNow;
 

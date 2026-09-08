@@ -2,6 +2,7 @@ using CMS.API.Infrastructure;
 using CMS.API.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.OpenApi.Models;
 
 // Dapper type handlers must be registered before any query runs.
@@ -20,7 +21,10 @@ builder.Services.AddSwaggerGen(options =>
     {
         Title = "CMS API",
         Version = "v1",
-        Description = "CMS backend API (Dapper over MS SQL Server)."
+        Description = "CMS backend API (Dapper over MS SQL Server). Every endpoint but "
+                      + "POST /api/auth/login needs a bearer token, and every endpoint but "
+                      + "PUT /api/auth/password answers 403 while the caller's password is still "
+                      + "the configured default."
     });
 
     var xmlPath = Path.Combine(AppContext.BaseDirectory, $"{typeof(Program).Assembly.GetName().Name}.xml");
@@ -74,14 +78,36 @@ builder.Services
     .AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
     .Configure<IHttpContextAccessor>(JwtBearerSetup.Configure);
 
-// Authorization is global: every endpoint requires an authenticated user unless it carries
-// [AllowAnonymous], which only AuthController does. A new controller is protected by default.
+// Authorization is global: every endpoint requires an authenticated user — and a user who is not
+// still on the configured default password — unless it carries [AllowAnonymous], which only
+// AuthController.Login does. A new controller is protected by default.
 builder.Services.AddAuthorization(options =>
 {
-    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+    var passwordNotDefault = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
+        .AddRequirements(new MustChangePasswordRequirement())
         .Build();
+
+    options.AddPolicy(AuthPolicies.PasswordNotDefault, passwordNotDefault);
+
+    // 變更密碼 alone: authenticated, but the default-password requirement lifted. Without it a
+    // flagged user would be locked out of the one endpoint that clears the flag.
+    options.AddPolicy(
+        AuthPolicies.PasswordChangeExempt,
+        new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+
+    // Both, deliberately. FallbackPolicy covers an endpoint with no [Authorize] at all;
+    // DefaultPolicy covers one carrying a *bare* [Authorize], which bypasses the fallback entirely.
+    // Setting only the first would leave any future bare [Authorize] — or an [Authorize(Roles=…)],
+    // which also opts out — silently exempt from the password check.
+    options.DefaultPolicy = passwordNotDefault;
+    options.FallbackPolicy = passwordNotDefault;
 });
+
+// The requirement's handler, and the result handler that gives its 403 a Chinese body.
+builder.Services.AddSingleton<IAuthorizationHandler, MustChangePasswordHandler>();
+builder.Services
+    .AddSingleton<IAuthorizationMiddlewareResultHandler, PasswordChangeRequiredResultHandler>();
 
 builder.Services.AddSingleton<IDbConnectionFactory, SqlConnectionFactory>();
 builder.Services.AddScoped<IAppRoleRepository, AppRoleRepository>();
@@ -99,6 +125,12 @@ builder.Services.AddScoped<IAuthRepository, AuthRepository>();
 builder.Services.AddScoped<ISysConfigRepository, SysConfigRepository>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IPasswordPolicyService, PasswordPolicyService>();
+builder.Services.AddScoped<IDefaultPasswordService, DefaultPasswordService>();
+
+// 異動紀錄 — cross-cutting, so it is registered beside the services rather than per feature. It
+// reads the caller's UserName off the current request, which is what IHttpContextAccessor (already
+// added above for the bearer key resolver) is for.
+builder.Services.AddScoped<IRowAuditWriter, RowAuditWriter>();
 
 var app = builder.Build();
 

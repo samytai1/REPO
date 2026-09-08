@@ -1,9 +1,9 @@
 <div
   class="app-shell"
   [class.app-shell--collapsed]="collapsed()"
-  [class.app-shell--anonymous]="!signedIn()"
+  [class.app-shell--anonymous]="!showChrome()"
 >
-  @if (signedIn()) {
+  @if (showChrome()) {
     <aside class="app-sidebar">
       <div class="app-sidebar__brand">
         <span class="app-sidebar__brand-text">{{ brand }}</span>
@@ -53,7 +53,7 @@
   }
 
   <main class="app-content">
-    @if (signedIn()) {
+    @if (showChrome()) {
       <header class="app-topbar">
         <button
           type="button"

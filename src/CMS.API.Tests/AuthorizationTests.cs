@@ -8,9 +8,10 @@ using CMS.API.Models;
 namespace CMS.API.Tests;
 
 /// <summary>
-/// End-to-end cover for the request pipeline set up in <c>Program.cs</c>: a global fallback policy
-/// requires an authenticated user on every endpoint, and <c>AuthController.Login</c> is the one
-/// <c>[AllowAnonymous]</c> exception.
+/// End-to-end cover for the request pipeline set up in <c>Program.cs</c>: a global policy requires
+/// an authenticated user — who is not still on the configured 預設密碼 — on every endpoint, with
+/// <c>AuthController.Login</c> the one <c>[AllowAnonymous]</c> exception and
+/// <c>AuthController.ChangePassword</c> the one exemption from the password half of it.
 ///
 /// These run against a real host (<see cref="TestApiFactory"/>) rather than a controller instance,
 /// because that is the only way the middleware — not the action — is what gets tested.
@@ -471,6 +472,220 @@ public class AuthorizationTests : IClassFixture<TestApiFactory>
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.False(string.IsNullOrWhiteSpace(await factory.LoginAsync()));
+    }
+
+    // ---------- 預設密碼: 403 everywhere but 變更密碼 ----------
+
+    /// <summary>
+    /// The mirror image of <see cref="EveryEndpointButLogin_Returns401_WithoutABearerToken"/>, and
+    /// deliberately the same route table: a caller holding a perfectly valid token is refused
+    /// everywhere until they have moved off the shared default password.
+    /// </summary>
+    [Theory]
+    [InlineData("GET", "/api/app-roles")]
+    [InlineData("GET", "/api/publish-statuses")]
+    [InlineData("GET", "/api/partners")]
+    [InlineData("GET", "/api/courses")]
+    [InlineData("GET", "/api/featured-promo-items")]
+    [InlineData("GET", "/api/lookups/partners")]
+    [InlineData("GET", "/api/publish-statuses/1")]
+    [InlineData("POST", "/api/publish-statuses/query")]
+    [InlineData("POST", "/api/publish-statuses")]
+    [InlineData("PUT", "/api/publish-statuses")]
+    [InlineData("DELETE", "/api/publish-statuses/1")]
+    [InlineData("PUT", "/api/auth/profile")]
+    public async Task AUserOnTheDefaultPassword_Gets403_OnEveryEndpointButThePasswordChange(
+        string method,
+        string route)
+    {
+        using var factory = new TestApiFactory();
+        using var client = factory.CreateClientWithToken(
+            await factory.LoginAsync(TestApiFactory.StaleUserId, TestApiFactory.DefaultPassword));
+        using var request = new HttpRequestMessage(new HttpMethod(method), route);
+
+        if (method is "POST" or "PUT") request.Content = JsonContent.Create(new { });
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    /// <summary>
+    /// The status code the client half of the feature hangs on. <c>authErrorInterceptor</c> signs
+    /// the user out on any 401 outside the login call, and explicitly ignores a 403 — so this must
+    /// be a 403, or a flagged user would be bounced to /login instead of to 變更密碼.
+    /// </summary>
+    [Fact]
+    public async Task AUserOnTheDefaultPassword_Gets403_NotA401_SoTheBrowserDoesNotSignThemOut()
+    {
+        using var factory = new TestApiFactory();
+        using var client = factory.CreateClientWithToken(
+            await factory.LoginAsync(TestApiFactory.StaleUserId, TestApiFactory.DefaultPassword));
+
+        var response = await client.GetAsync(TestApiFactory.ProtectedRoute);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TheForbiddenResponse_CarriesTheChineseReason()
+    {
+        // The framework's own 403 is bodyless. A Swagger user, or any non-browser caller, would
+        // otherwise have no way to tell this refusal from an ordinary one.
+        using var factory = new TestApiFactory();
+        using var client = factory.CreateClientWithToken(
+            await factory.LoginAsync(TestApiFactory.StaleUserId, TestApiFactory.DefaultPassword));
+
+        var response = await client.GetAsync(TestApiFactory.ProtectedRoute);
+
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+
+        var problem = await response.Content.ReadFromJsonAsync<ProblemDetailsBody>();
+        Assert.Equal(MustChangePasswordRequirement.Message, problem!.Detail);
+    }
+
+    [Fact]
+    public async Task AUserOnTheDefaultPassword_MayStillChangeTheirPassword()
+    {
+        // The exemption, end to end: the one endpoint that clears the flag stays reachable.
+        using var factory = new TestApiFactory();
+        using var client = factory.CreateClientWithToken(
+            await factory.LoginAsync(TestApiFactory.StaleUserId, TestApiFactory.DefaultPassword));
+
+        var response = await client.PutAsJsonAsync("/api/auth/password", new ChangePasswordRequest
+        {
+            CurrentPassword = TestApiFactory.DefaultPassword,
+            NewPassword = "N3wP@ssw0rd"
+        });
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(0, response.Content.Headers.ContentLength ?? 0);
+    }
+
+    /// <summary>
+    /// Looks like a bug and is not. The token is never re-issued, so the flag it carries outlives
+    /// the password it described — which is exactly why the browser signs the user out here instead
+    /// of leaving them holding a token every other route refuses. Its unflagged twin is
+    /// <see cref="ChangePassword_DoesNotInvalidateTheCallersOwnToken"/>.
+    /// </summary>
+    [Fact]
+    public async Task AfterTheForcedChange_TheSameTokenIsStillForbidden_BecauseNothingIsReissued()
+    {
+        using var factory = new TestApiFactory();
+        var token = await factory.LoginAsync(TestApiFactory.StaleUserId, TestApiFactory.DefaultPassword);
+        using var client = factory.CreateClientWithToken(token);
+
+        var change = await client.PutAsJsonAsync("/api/auth/password", new ChangePasswordRequest
+        {
+            CurrentPassword = TestApiFactory.DefaultPassword,
+            NewPassword = "N3wP@ssw0rd"
+        });
+        Assert.Equal(HttpStatusCode.NoContent, change.StatusCode);
+
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await client.GetAsync(TestApiFactory.ProtectedRoute)).StatusCode);
+    }
+
+    [Fact]
+    public async Task AfterTheForcedChange_SigningInAgainGetsAnUnrestrictedToken()
+    {
+        using var factory = new TestApiFactory();
+        using var flagged = factory.CreateClientWithToken(
+            await factory.LoginAsync(TestApiFactory.StaleUserId, TestApiFactory.DefaultPassword));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await flagged.PutAsJsonAsync(
+            "/api/auth/password",
+            new ChangePasswordRequest
+            {
+                CurrentPassword = TestApiFactory.DefaultPassword,
+                NewPassword = "N3wP@ssw0rd"
+            })).StatusCode);
+
+        using var after = factory.CreateClientWithToken(
+            await factory.LoginAsync(TestApiFactory.StaleUserId, "N3wP@ssw0rd"));
+
+        Assert.Equal(HttpStatusCode.OK, (await after.GetAsync(TestApiFactory.ProtectedRoute)).StatusCode);
+    }
+
+    [Fact]
+    public async Task AnOrdinaryUser_IsUnaffected_BySharingThePolicyWithTheFlaggedOne()
+    {
+        // Guards the direction that would hurt most: the policy change must not close the API to
+        // everybody. helen's password is not the default, and nothing about her request changed.
+        using var client = _factory.CreateClientWithToken(await _factory.LoginAsync("helen", "helen-pw"));
+
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(TestApiFactory.ProtectedRoute)).StatusCode);
+    }
+
+    /// <summary>
+    /// Accepted, and pinned so it is a decision rather than a discovery: a token minted before this
+    /// feature existed carries no claim, so it is not flagged and keeps full access for up to its
+    /// 24-hour lifetime. Rotating <c>symmetricSecurityKey</c> at deploy kills every such token on
+    /// the next request — it is one UPDATE, and it needs no restart.
+    /// </summary>
+    [Fact]
+    public async Task AUserWhoseTokenPredatesTheFeature_IsNotForbidden()
+    {
+        using var client = _factory.CreateClientWithToken(
+            TestApiFactory.SignToken(TestApiFactory.SigningKey, userId: TestApiFactory.StaleUserId));
+
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(TestApiFactory.ProtectedRoute)).StatusCode);
+    }
+
+    [Fact]
+    public async Task AHandMintedFlaggedToken_IsForbidden_SoTheGateIsTheMiddlewareNotTheLogin()
+    {
+        // The claim alone decides, whatever the account's password actually is: enforcement lives in
+        // the pipeline, not in a branch of AuthController.Login.
+        using var client = _factory.CreateClientWithToken(
+            TestApiFactory.SignToken(TestApiFactory.SigningKey, mustChangePassword: true));
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(TestApiFactory.ProtectedRoute)).StatusCode);
+    }
+
+    /// <summary>
+    /// The flag is decided per **login**, not per request — unlike the signing key, which is re-read
+    /// on every call. Rotating <c>defaultPassword</c> therefore leaves everyone already holding a
+    /// token exactly as they were, and only takes effect the next time they sign in.
+    /// </summary>
+    [Fact]
+    public async Task RotatingTheDefaultPassword_ChangesNobodyAlreadyHoldingAToken_ButFlagsTheNextLogin()
+    {
+        using var factory = new TestApiFactory();
+        var token = await factory.LoginAsync();
+
+        using (var before = factory.CreateClientWithToken(token))
+        {
+            Assert.Equal(HttpStatusCode.OK, (await before.GetAsync(TestApiFactory.ProtectedRoute)).StatusCode);
+        }
+
+        factory.SeedAppConfig(TestApiFactory.SigningKey, TestApiFactory.AdminPassword);
+
+        using (var after = factory.CreateClientWithToken(token))
+        {
+            Assert.Equal(HttpStatusCode.OK, (await after.GetAsync(TestApiFactory.ProtectedRoute)).StatusCode);
+        }
+
+        using var reissued = factory.CreateClientWithToken(await factory.LoginAsync());
+        Assert.Equal(HttpStatusCode.Forbidden, (await reissued.GetAsync(TestApiFactory.ProtectedRoute)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Login_IsReachable_ByAUserOnTheDefaultPassword()
+    {
+        // [AllowAnonymous] short-circuits the policy entirely, so a flagged user is never locked out
+        // of the endpoint that hands them the token they need to fix it.
+        using var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/auth/login", new LoginRequest
+        {
+            UserId = TestApiFactory.StaleUserId,
+            Password = TestApiFactory.DefaultPassword
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     // ---------- Swagger stays reachable ----------
