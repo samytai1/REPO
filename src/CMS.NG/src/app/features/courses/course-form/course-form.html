@@ -1,5 +1,6 @@
 <form [formGroup]="form" (ngSubmit)="save()">
-  <div class="page-header page-card">
+  <!-- Pinned to the top of the content column: 儲存 stays reachable anywhere down the form. -->
+  <div class="page-header page-card course-form__toolbar">
     <h1 class="page-header__title">{{ isEditMode ? '編輯課程' : '新增課程' }}</h1>
 
     <div class="page-header__actions">

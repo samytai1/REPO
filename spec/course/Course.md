@@ -717,6 +717,12 @@ spec must `await fixture.whenStable()` before reading the `<img>`.
 ### Form component
 
 - One component for add and edit; mode from the route `:id`.
+- The 取消／儲存 header (`.page-header.page-card.course-form__toolbar`, the form's first child) is
+  **pinned**: `position: sticky; top: 0; z-index: 20`, so 儲存 stays reachable anywhere down a form
+  this long. It sits inside `.app-content`, one grid column over from the sidebar, so pinning it
+  cannot overlay the shell chrome; nothing between it and the document sets `overflow`, which would
+  silently break `sticky`. `top: 0` leaves no strip above the bar for scrolled fields to show
+  through, and the z-index stays far below PrimeNG's overlays and toasts, which must still win.
 - `forkJoin` on init: `partners`, `course-groups`, `publish-statuses`, `job-categories`,
   `certifications` — plus `getById` in edit mode.
 - `pkid` — `p-inputnumber`, **edit mode only** (`@if (isEditMode)`), `disable()`d; read values with

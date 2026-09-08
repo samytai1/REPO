@@ -393,4 +393,50 @@ describe('CourseForm', () => {
     component.cancel();
     expect(navigate).toHaveBeenCalledWith(['/courses']);
   });
+
+  describe('pinned action toolbar', () => {
+    /**
+     * Asserts the real computed style, not just the class: a sticky bar that stopped sticking
+     * still carries its class, and the whole point is that 儲存 survives a long scroll.
+     */
+    function expectPinnedToolbar(): void {
+      const toolbar = fixture.nativeElement.querySelector('.course-form__toolbar') as HTMLElement;
+      expect(toolbar).not.toBeNull();
+
+      const style = getComputedStyle(toolbar);
+      expect(style.position).toBe('sticky');
+      expect(style.top).toBe('0px');
+      // Above the form body, so fields scroll behind the bar instead of over it.
+      expect(Number(style.zIndex)).toBeGreaterThan(0);
+
+      const section = fixture.nativeElement.querySelector('.course-form__section') as HTMLElement;
+      expect(getComputedStyle(section).zIndex).toBe('auto');
+
+      // The bar is the form's first child, so it pins across the whole scrolling body.
+      const formEl = fixture.nativeElement.querySelector('form') as HTMLElement;
+      expect(formEl.firstElementChild).toBe(toolbar);
+
+      // 取消 and 儲存 stay inside the pinned bar, 儲存 still submitting the form.
+      const labels = Array.from(toolbar.querySelectorAll('p-button')).map((b) =>
+        b.textContent?.trim(),
+      );
+      expect(labels).toEqual(['取消', '儲存']);
+      expect(toolbar.querySelector('button[type="submit"]')).not.toBeNull();
+      expect(toolbar.querySelector('button[type="button"]')).not.toBeNull();
+    }
+
+    it('pins the toolbar on the add form', async () => {
+      await setup(null);
+
+      expect(component.isEditMode).toBeFalse();
+      expectPinnedToolbar();
+    });
+
+    it('pins the toolbar on the edit form', async () => {
+      await setup('1');
+
+      expect(component.isEditMode).toBeTrue();
+      expectPinnedToolbar();
+    });
+  });
 });

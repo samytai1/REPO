@@ -1,4 +1,18 @@
 .course-form {
+  /*
+   * The action bar sticks to the top of the viewport while the form scrolls underneath it. It
+   * lives inside `.app-content`, one grid column over from the sidebar, so pinning it can never
+   * overlay the shell chrome — and no ancestor sets `overflow`, which would break `sticky`.
+   * `top: 0` leaves no gap above the bar for scrolled fields to show through, and the z-index
+   * keeps them behind it (well under PrimeNG's overlays and toasts, which must still win).
+   */
+  &__toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
+  }
+
   &__section {
     margin-top: 0.75rem;
   }
