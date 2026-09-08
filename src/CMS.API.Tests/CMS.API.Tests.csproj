@@ -23,4 +23,13 @@
     <ProjectReference Include="..\CMS.API\CMS.API.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      The 異動紀錄 integration tests build their throwaway database from the project's own DDL, so
+      the schema under test cannot drift from database\admin.sql. Copied rather than located by
+      walking up from the output folder, which -p:OutDir moves out of the repository entirely.
+    -->
+    <None Include="..\..\database\admin.sql" Link="database\admin.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

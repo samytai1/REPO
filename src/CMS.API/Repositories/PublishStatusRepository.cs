@@ -12,7 +12,11 @@ public class PublishStatusRepository : IPublishStatusRepository
     /// <summary>SQL Server error number for a foreign key constraint violation.</summary>
     private const int ForeignKeyViolation = 547;
 
+    /// <summary>Table this repository owns, as it is written to dbo.RowAudit.TableName.</summary>
+    private const string AuditTableName = "PublishStatus";
+
     private readonly IDbConnectionFactory _connectionFactory;
+    private readonly IRowAuditWriter _rowAudit;
 
     /// <summary>Shared projection. No FKs and no junction tables, so this is a plain single-table read.</summary>
     private const string SelectSql = @"
@@ -23,9 +27,10 @@ SELECT  s.pkid            AS Pkid,
         s.IsDiscontinued  AS IsDiscontinued
 FROM    dbo.PublishStatus s";
 
-    public PublishStatusRepository(IDbConnectionFactory connectionFactory)
+    public PublishStatusRepository(IDbConnectionFactory connectionFactory, IRowAuditWriter rowAudit)
     {
         _connectionFactory = connectionFactory;
+        _rowAudit = rowAudit;
     }
 
     public async Task<IEnumerable<PublishStatus>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -128,6 +133,9 @@ VALUES (@Pkid, @Description, @IsDraft, @IsPublished, @IsDiscontinued)",
 
         var created = await GetByIdAsync(connection, transaction, request.Pkid, cancellationToken);
 
+        // Inside the transaction: a failed INSERT leaves no row and no audit row.
+        await _rowAudit.LogInsertAsync(connection, transaction, AuditTableName, created!, cancellationToken);
+
         transaction.Commit();
 
         return created!;
@@ -137,6 +145,16 @@ VALUES (@Pkid, @Description, @IsDraft, @IsPublished, @IsDiscontinued)",
     {
         using var connection = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
+
+        // Read first: the audit trail's changed-column list is the difference between this row and
+        // the one the UPDATE leaves behind, so it cannot be worked out afterwards.
+        var before = await GetByIdAsync(connection, transaction, request.Pkid, cancellationToken);
+
+        if (before is null)
+        {
+            transaction.Rollback();
+            return null;
+        }
 
         var affected = await connection.ExecuteAsync(new CommandDefinition(@"
 UPDATE  dbo.PublishStatus
@@ -164,6 +182,8 @@ WHERE   pkid = @Pkid",
 
         var updated = await GetByIdAsync(connection, transaction, request.Pkid, cancellationToken);
 
+        await _rowAudit.LogUpdateAsync(connection, transaction, AuditTableName, before, updated!, cancellationToken);
+
         transaction.Commit();
 
         return updated;
@@ -173,18 +193,38 @@ WHERE   pkid = @Pkid",
     {
         using var connection = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
 
+        // A transaction the delete did not need before the audit trail existed: the row and the
+        // record of its removal have to land — or not land — together.
+        using var transaction = connection.BeginTransaction();
+
         try
         {
-            var affected = await connection.ExecuteAsync(new CommandDefinition(
+            // Read before deleting; once the row is gone its Description is unrecoverable, and that
+            // description is the only human-readable trace the trail can keep.
+            var deleting = await GetByIdAsync(connection, transaction, pkid, cancellationToken);
+
+            if (deleting is null)
+            {
+                transaction.Rollback();
+                return PublishStatusDeleteResult.NotFound;
+            }
+
+            await connection.ExecuteAsync(new CommandDefinition(
                 "DELETE FROM dbo.PublishStatus WHERE pkid = @Pkid",
                 new { Pkid = pkid },
+                transaction,
                 cancellationToken: cancellationToken));
 
-            return affected > 0 ? PublishStatusDeleteResult.Deleted : PublishStatusDeleteResult.NotFound;
+            await _rowAudit.LogDeleteAsync(connection, transaction, AuditTableName, deleting, cancellationToken);
+
+            transaction.Commit();
+
+            return PublishStatusDeleteResult.Deleted;
         }
         catch (SqlException ex) when (ex.Number == ForeignKeyViolation)
         {
             // Course.PublishStatus_pkid / Promotion2.PublishStatus_pkid still point at this row.
+            transaction.Rollback();
             return PublishStatusDeleteResult.InUse;
         }
     }

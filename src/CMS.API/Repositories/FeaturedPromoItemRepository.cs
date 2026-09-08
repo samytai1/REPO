@@ -19,7 +19,11 @@ public class FeaturedPromoItemRepository : IFeaturedPromoItemRepository
     /// </summary>
     private const byte ParkingSlot = 0;
 
+    /// <summary>Table this repository owns, as it is written to dbo.RowAudit.TableName.</summary>
+    private const string AuditTableName = "FeaturedPromoItem";
+
     private readonly IDbConnectionFactory _connectionFactory;
+    private readonly IRowAuditWriter _rowAudit;
 
     /// <summary>Shared projection. The two FK nav blocks come last, in splitOn order.</summary>
     private const string SelectSql = @"
@@ -38,9 +42,10 @@ FROM    dbo.FeaturedPromoItem f
         INNER JOIN dbo.Promotion2     p  ON p.pkid  = f.Promotion_pkid
         INNER JOIN dbo.TrainingCenter tc ON tc.pkid = f.TrainingCenter_pkid";
 
-    public FeaturedPromoItemRepository(IDbConnectionFactory connectionFactory)
+    public FeaturedPromoItemRepository(IDbConnectionFactory connectionFactory, IRowAuditWriter rowAudit)
     {
         _connectionFactory = connectionFactory;
+        _rowAudit = rowAudit;
     }
 
     public async Task<IEnumerable<FeaturedPromoItem>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -124,6 +129,9 @@ SELECT CAST(SCOPE_IDENTITY() AS int);",
 
         var created = await GetByIdAsync(connection, transaction, pkid, cancellationToken);
 
+        // Inside the transaction: a failed INSERT leaves no row and no audit row.
+        await _rowAudit.LogInsertAsync(connection, transaction, AuditTableName, created!, cancellationToken);
+
         transaction.Commit();
 
         return created!;
@@ -133,6 +141,16 @@ SELECT CAST(SCOPE_IDENTITY() AS int);",
     {
         using var connection = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
+
+        // Read first: the audit trail's changed-column list is the difference between this row and
+        // the one the UPDATE leaves behind, so it cannot be worked out afterwards.
+        var before = await GetByIdAsync(connection, transaction, request.Pkid, cancellationToken);
+
+        if (before is null)
+        {
+            transaction.Rollback();
+            return null;
+        }
 
         var parameters = ToParameters(request);
         parameters.Add("Pkid", request.Pkid);
@@ -158,6 +176,8 @@ WHERE   pkid = @Pkid",
 
         var updated = await GetByIdAsync(connection, transaction, request.Pkid, cancellationToken);
 
+        await _rowAudit.LogUpdateAsync(connection, transaction, AuditTableName, before, updated!, cancellationToken);
+
         transaction.Commit();
 
         return updated;
@@ -167,12 +187,31 @@ WHERE   pkid = @Pkid",
     {
         using var connection = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
 
-        var affected = await connection.ExecuteAsync(new CommandDefinition(
+        // A transaction the delete did not need before the audit trail existed: the row and the
+        // record of its removal have to land — or not land — together.
+        using var transaction = connection.BeginTransaction();
+
+        // Read before deleting; once the row is gone its Topic is the only human-readable trace the
+        // trail can keep.
+        var deleting = await GetByIdAsync(connection, transaction, pkid, cancellationToken);
+
+        if (deleting is null)
+        {
+            transaction.Rollback();
+            return false;
+        }
+
+        await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM dbo.FeaturedPromoItem WHERE pkid = @Pkid",
             new { Pkid = pkid },
+            transaction,
             cancellationToken: cancellationToken));
 
-        return affected > 0;
+        await _rowAudit.LogDeleteAsync(connection, transaction, AuditTableName, deleting, cancellationToken);
+
+        transaction.Commit();
+
+        return true;
     }
 
     public async Task<FeaturedPromoItem?> MoveSlotAsync(int pkid, byte targetSlot, CancellationToken cancellationToken = default)
@@ -204,6 +243,12 @@ WHERE   f.ScheduleOn = @ScheduleOn
             transaction,
             cancellationToken: cancellationToken));
 
+        // The occupant's before-picture, read while it still has its old slot: a swap moves two
+        // rows, and the trail owes a row for each of them.
+        var occupant = occupantPkid.HasValue
+            ? await GetByIdAsync(connection, transaction, occupantPkid.Value, cancellationToken)
+            : null;
+
         // (ScheduleOn, TrainingCenter_pkid, Slot) is UNIQUE, so a swap has to go through a parking
         // slot: occupant → 0, item → target, occupant → item's old slot.
         if (occupantPkid.HasValue)
@@ -219,6 +264,17 @@ WHERE   f.ScheduleOn = @ScheduleOn
         }
 
         var moved = await GetByIdAsync(connection, transaction, pkid, cancellationToken);
+
+        // A move is an update like any other — it just happens to be spelled as three statements.
+        // The parking slot never reaches the trail: only the before and after states do.
+        await _rowAudit.LogUpdateAsync(connection, transaction, AuditTableName, item, moved!, cancellationToken);
+
+        if (occupant is not null)
+        {
+            var occupantAfter = await GetByIdAsync(connection, transaction, occupant.Pkid, cancellationToken);
+
+            await _rowAudit.LogUpdateAsync(connection, transaction, AuditTableName, occupant, occupantAfter!, cancellationToken);
+        }
 
         transaction.Commit();
 

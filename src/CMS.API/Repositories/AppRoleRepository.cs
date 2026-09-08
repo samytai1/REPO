@@ -8,7 +8,11 @@ namespace CMS.API.Repositories;
 /// <inheritdoc />
 public class AppRoleRepository : IAppRoleRepository
 {
+    /// <summary>Table this repository owns, as it is written to dbo.RowAudit.TableName.</summary>
+    private const string AuditTableName = "AppRole";
+
     private readonly IDbConnectionFactory _connectionFactory;
+    private readonly IRowAuditWriter _rowAudit;
 
     /// <summary>Shared projection. UserCount is a subquery over the n-n junction table.</summary>
     private const string SelectSql = @"
@@ -20,9 +24,10 @@ SELECT  r.pkid              AS Pkid,
         (SELECT COUNT(1) FROM dbo.AppUserRole ur WHERE ur.RoleId = r.RoleId) AS UserCount
 FROM    dbo.AppRole r";
 
-    public AppRoleRepository(IDbConnectionFactory connectionFactory)
+    public AppRoleRepository(IDbConnectionFactory connectionFactory, IRowAuditWriter rowAudit)
     {
         _connectionFactory = connectionFactory;
+        _rowAudit = rowAudit;
     }
 
     public async Task<IEnumerable<AppRole>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -107,6 +112,9 @@ VALUES (@RoleId, @RoleName, @PermissionLevel, @Description)",
 
         var created = await GetByIdAsync(connection, transaction, request.RoleId, cancellationToken);
 
+        // Inside the transaction: a failed INSERT leaves no row and no audit row.
+        await _rowAudit.LogInsertAsync(connection, transaction, AuditTableName, created!, cancellationToken);
+
         transaction.Commit();
 
         return created!;
@@ -116,6 +124,17 @@ VALUES (@RoleId, @RoleName, @PermissionLevel, @Description)",
     {
         using var connection = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
+
+        // Read first, and read the members with it: rewriting dbo.AppUserRole is the most
+        // consequential thing this endpoint does — it can grant Admin — so `Users` has to be part of
+        // the before-picture or the trail would show a role change as touching nothing.
+        var before = await GetByIdAsync(connection, transaction, request.RoleId, cancellationToken);
+
+        if (before is null)
+        {
+            transaction.Rollback();
+            return null;
+        }
 
         var affected = await connection.ExecuteAsync(new CommandDefinition(@"
 UPDATE  dbo.AppRole
@@ -143,6 +162,8 @@ WHERE   RoleId = @RoleId",
 
         var updated = await GetByIdAsync(connection, transaction, request.RoleId, cancellationToken);
 
+        await _rowAudit.LogUpdateAsync(connection, transaction, AuditTableName, before, updated!, cancellationToken);
+
         transaction.Commit();
 
         return updated;
@@ -153,21 +174,32 @@ WHERE   RoleId = @RoleId",
         using var connection = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
 
+        // Read before deleting; once the row is gone its RoleId is the only trace the trail keeps.
+        var deleting = await GetByIdAsync(connection, transaction, roleId, cancellationToken);
+
+        if (deleting is null)
+        {
+            transaction.Rollback();
+            return false;
+        }
+
         await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM dbo.AppUserRole WHERE RoleId = @RoleId",
             new { RoleId = roleId },
             transaction,
             cancellationToken: cancellationToken));
 
-        var affected = await connection.ExecuteAsync(new CommandDefinition(
+        await connection.ExecuteAsync(new CommandDefinition(
             "DELETE FROM dbo.AppRole WHERE RoleId = @RoleId",
             new { RoleId = roleId },
             transaction,
             cancellationToken: cancellationToken));
 
+        await _rowAudit.LogDeleteAsync(connection, transaction, AuditTableName, deleting, cancellationToken);
+
         transaction.Commit();
 
-        return affected > 0;
+        return true;
     }
 
     /// <summary>Reads the role plus its n-n members on an existing connection.</summary>

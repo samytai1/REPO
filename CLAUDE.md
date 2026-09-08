@@ -9,7 +9,7 @@ code in that area**, not after something breaks.
 
 | Read | Before |
 |------|--------|
-| `docs\backend.md` | a model, repository or controller — PK kinds (IDENTITY vs user-supplied), FK nav objects / multi-map, n-n junctions, delete-409, lookup-only repositories, routes, model binding, **login / JWT**, **an endpoint that acts on the caller**, **an authorization policy or requirement** |
+| `docs\backend.md` | a model, repository or controller — PK kinds (IDENTITY vs user-supplied), FK nav objects / multi-map, n-n junctions, delete-409, lookup-only repositories, routes, model binding, **login / JWT**, **an endpoint that acts on the caller**, **an authorization policy or requirement**, **any write that has to leave a 異動紀錄 row** |
 | `docs\frontend.md` | a list / detail / form page or a service — drawer and tri-state filters, in-place cell editing, form defaults, dates, nullable-FK selects, routing, styling, **the signed-in session, the user menu, 個人資料 and the forced 變更密碼** |
 | `docs\testing.md` | tests — fake semantics, per-suite checklists, and the gotchas that already bit once |
 | `docs\environment.md` | fighting the toolchain — PrimeNG licence banner, stale Vite bundle, locked `bin\`, budgets, connection string, `sqlcmd` |
@@ -27,8 +27,11 @@ docs\                the conventions (see table above)
 .claude\skills\crud\ the /crud skill: schema → spec → build (untracked)
 global.json          pins .NET SDK 9.0.316
 src\CMS.sln          CMS.API + CMS.API.Tests
-src\CMS.API\         Models\ Repositories\ Controllers\ Infrastructure\
-src\CMS.API.Tests\   xUnit; Fakes\ holds in-memory repositories
+src\CMS.API\         Models\ Repositories\ Controllers\ Infrastructure\ — Infrastructure\ holds the cross-cutting
+                     services every feature reuses: connections, JWT, password rules, the RowAudit writer
+src\CMS.API.Tests\   xUnit; Fakes\ holds in-memory repositories. The 異動紀錄 suites are the exception —
+                     SqlServerDatabaseFixture builds a throwaway database from database\admin.sql, and
+                     [SqlServerFact] skips them when no SQL Server answers
 src\CMS.NG\          Angular app — src\app\{core,shared,features}\; core\ holds models, services, guards, interceptors, utils, testing
                      features\ is one folder per feature; auth\login, auth\force-password-change and profile\ are single pages, not triples
 ```
@@ -56,6 +59,7 @@ Copy the closest one rather than inventing a shape:
 | `Partner` | IDENTITY key, nullable column, derived tri-state filter |
 | `Course` | three FK nav objects via multi-map, two n-n, `date`/`decimal`/`bit`, lookup-only repositories, in-place cell editing |
 | `FeaturedPromoItem` | the one **custom** page — weekly grid + inline form instead of list/detail/form (`spec\promotion\FeaturedPromoItem.md`) |
+| `RowAudit` | the one **cross-cutting** mechanism — no model, no controller, no page. `RowAuditWriter` turns any entity into one `dbo.RowAudit` row by reflection, and all five write repositories call it inside their own transaction. Copy its call sites (`PublishStatusRepository` is the smallest) when a new table gets writes, and its test shape when something can only be proved against a real database |
 | `Auth` | the **non-CRUD** endpoints and the one public page — `POST /api/auth/login` (SHA-256 credential check, JWT signed with a secret read from `dbo.SysConfig`), `PUT /api/auth/profile` and `PUT /api/auth/password` (個人資料: the signed-in user renames themselves and changes their own password), plus bearer validation, the login page, the interceptors, the guards, the header user menu and the role-gated sidebar. Also the reference for an **authorization requirement**: the 預設密碼 forced change — an `IAuthorizationRequirement` + handler + `IAuthorizationMiddlewareResultHandler`, two named policies, and the one action that is exempt from one of them. Build history in `spec\auth\Auth.md`; the behavioural contract, enforcement matrix and residual risks in `spec\auth\auth-authz.spec.md` |
 
 ## Invariants
@@ -82,13 +86,14 @@ Silently wrong if you guess; the details are in `docs\`.
 - **Only `/api/auth/login` may answer 401 for a bad password.** Everywhere else a 401 means "session expired" to `authErrorInterceptor`, which signs the user out — so a rejected 變更密碼 (wrong current password, weak new one) is a **400** carrying the reason in `ProblemDetails.detail`.
 - Password rules live in `enforcePasswordPolicy` (SysConfig), read per request and **failing closed**: an unreadable config keeps the rules on. The server owns them; the browser checks only "filled in" and "both entries match" and shows the server's message. Note the deliberate asymmetry: `defaultPassword`, in the same JSON row, fails **open**.
 - Every feature route carries `canActivate: [authGuard, passwordChangeGuard]`. `/change-password` is the exception and carries `unflaggedAwayFromForceGuard` **instead** — giving it both would redirect a flagged user to the page they are already on, and the `**` fallback turns that into a loop.
+- **Every write to a business table writes one `dbo.RowAudit` row**, through `IRowAuditWriter` — always the overload taking the repository's own connection **and transaction**, so a rolled-back change leaves no audit row. Insert and delete read the row (the delete *before* deleting); update reads the "before" row *first*, because the changed-column list cannot be reconstructed afterwards. `ActionDesc` is the entity's first string property, or for an update the changed property names — compared **structurally**, never by reference, or every nav object and members list would show as changed on every save. It is `varchar(1000)` = 1000 **bytes** under a CP950 collation, so Chinese text truncates at 500 characters, not 1000. See `docs\backend.md` 異動紀錄.
 - A feature is done only when `dotnet test` **and** `ng test --watch=false` both pass.
 
 ## Adding the next feature
 
 1. **Read the table** in `database\*.sql`: PK type (**IDENTITY or not**), FKs, n-n junctions, nullable columns, UNIQUE natural keys, tables that FK into it.
 2. **Spec first.** `/crud TABLE=… SUB_SYSTEM=…` writes `spec\{sub-system}\{Table}.md`, then builds from it. A custom page starts from `spec\custom\{Table}\` — read its spec and mock-ups, then write the build spec by hand (`spec\promotion\FeaturedPromoItem.md` is the model).
-3. **Backend:** models → repository (+ interface) → controller → `Program.cs` → lookup endpoint if it is an FK target.
+3. **Backend:** models → repository (+ interface; **every write path logs a 異動紀錄 row** — see `docs\backend.md`) → controller → `Program.cs` → lookup endpoint if it is an FK target.
 4. **Backend tests:** in-memory fake + controller tests for list, filter, view, add, edit, delete, not-found / duplicate / still-referenced.
 5. **Frontend:** models → service → list/detail/form → `{table-plural}.routes.ts` → `app.routes.ts` (**with `canActivate: [authGuard, passwordChangeGuard]`** — both, in that order) → `NAV_GROUPS`. Defer link buttons whose target route does not exist and record them in the spec.
 6. **Frontend tests:** service HTTP contract + one spec per component.

@@ -32,6 +32,24 @@ Read **before** writing a model, repository or controller. `CLAUDE.md` indexes t
 - `date` columns are `DateOnly`, `time` columns `TimeOnly`; `DapperConfig.Register()` in `Program.cs` installs the handlers before the host is built. No per-feature work needed.
 - Connections come from `IDbConnectionFactory` (`Infrastructure\`), registered as a singleton; repositories are scoped and own the connection lifetime.
 
+## 異動紀錄 — the RowAudit trail
+
+Every write to a business table leaves one `dbo.RowAudit` row. The mechanism is one service,
+`Infrastructure\RowAuditWriter`, and it is entity-agnostic: it works out what to record by
+reflection, so a new table needs three call sites and no new audit code.
+
+- **Take `IRowAuditWriter` in the constructor** and declare `private const string AuditTableName = "…"` — the **database** table name (`"FeaturedPromoItem"`, not the model or the route), because that string is what someone reads the trail by.
+- **Always the overload that takes the connection and the transaction.** It enlists the audit INSERT in the caller's own transaction, which is the entire guarantee: a change that rolls back takes its audit row with it. The short overload opens its own connection and commits on its own — it is for a caller with no transaction to join, and a repository is never that caller.
+- **Insert:** after the post-write re-read, before the commit — `LogInsertAsync(connection, transaction, AuditTableName, created!, ct)`. `ActionDesc` becomes the entity's **first string property in declaration order** (`Course.CourseId`, `AppRole.RoleId`, `Partner.Name`), so put the identifying column early in the model.
+- **Update: read the row *before* you write it.** `ActionDesc` is the list of properties that differ between the two snapshots, and that difference cannot be reconstructed afterwards. The pre-read doubles as the 404 check, replacing the `affected == 0` guard as the reason to roll back and return `null`.
+- **Delete: read the row *before* you delete it.** Its first string property is the only trace of it the trail keeps. `PublishStatus`, `Partner` and `FeaturedPromoItem` grew a transaction they did not previously need so the DELETE and its audit row land together.
+- **A delete that answers 409 rolls back**, so a row still referenced by a child table leaves no audit row either. Same for a failed insert: the exception escapes with the transaction uncommitted.
+- **A no-op update still writes a row**, with an empty `ActionDesc`. "Someone saved this and changed nothing" is a fact about the session; a missing row would be indistinguishable from a missing audit call.
+- **Comparison is structural, not by reference.** `before` and `after` are two separate reads, so every nav object (`Course.Partner`), members list (`AppRole.Users`) and key list is a fresh instance — compared by reference they would appear in `ActionDesc` on *every* edit and bury the columns that really moved. `RowAuditWriter` compares collections element-wise and other reference types property-by-property, recursively.
+- **`UserName` comes from the token's `userName` claim**, via `IHttpContextAccessor`, falling back to `"system"` when nothing is signed in. Never `User.Identity.Name` — `JwtBearerSetup` maps `NameClaimType` to `userId`, so that property would sign every row with a number.
+- **`ActionDesc` is `varchar(1000)` — 1000 *bytes*, not characters.** The database collates `Chinese_Taiwan_Stroke_CI_AS` (CP950), where a Chinese character costs two, so a 1000-character 課程名稱 is 2000 bytes and SQL Server rejects the INSERT outright. The writer truncates on a byte budget; do not "simplify" it back to `value[..1000]`.
+- A move is an update: `FeaturedPromoItemRepository.MoveSlotAsync` writes one row for the item and one for the occupant it swapped with. The parking slot never reaches the trail — only the before and after states do.
+
 ## Controller rules
 
 `Controllers\AppRolesController.cs` is the template.

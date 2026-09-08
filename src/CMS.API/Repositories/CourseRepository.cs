@@ -21,7 +21,11 @@ public class CourseRepository : ICourseRepository
     /// </summary>
     private const string NavSplitOn = "Name,Description,Description";
 
+    /// <summary>Table this repository owns, as it is written to dbo.RowAudit.TableName.</summary>
+    private const string AuditTableName = "Course";
+
     private readonly IDbConnectionFactory _connectionFactory;
+    private readonly IRowAuditWriter _rowAudit;
 
     /// <summary>
     /// Shared projection. The three FK nav blocks come last, in splitOn order; the two n-n counts
@@ -124,9 +128,10 @@ FROM    dbo.CourseInCertification cx
 WHERE   cx.Course_pkid = @Pkid
 ORDER BY RTRIM(ct.Title) ASC";
 
-    public CourseRepository(IDbConnectionFactory connectionFactory)
+    public CourseRepository(IDbConnectionFactory connectionFactory, IRowAuditWriter rowAudit)
     {
         _connectionFactory = connectionFactory;
+        _rowAudit = rowAudit;
     }
 
     public async Task<IEnumerable<Course>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -231,6 +236,9 @@ ORDER BY RTRIM(ct.Title) ASC";
 
         var created = await GetByIdAsync(connection, transaction, pkid, cancellationToken);
 
+        // Inside the transaction: a failed INSERT leaves no row and no audit row.
+        await _rowAudit.LogInsertAsync(connection, transaction, AuditTableName, created!, cancellationToken);
+
         transaction.Commit();
 
         return created!;
@@ -240,6 +248,16 @@ ORDER BY RTRIM(ct.Title) ASC";
     {
         using var connection = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
+
+        // Read first — nav objects, junction counts and all: the changed-column list is the
+        // difference between this row and the one the UPDATE leaves behind.
+        var before = await GetByIdAsync(connection, transaction, request.Pkid, cancellationToken);
+
+        if (before is null)
+        {
+            transaction.Rollback();
+            return null;
+        }
 
         var parameters = ToParameters(request);
         parameters.Add("Pkid", request.Pkid);
@@ -260,6 +278,8 @@ ORDER BY RTRIM(ct.Title) ASC";
 
         var updated = await GetByIdAsync(connection, transaction, request.Pkid, cancellationToken);
 
+        await _rowAudit.LogUpdateAsync(connection, transaction, AuditTableName, before, updated!, cancellationToken);
+
         transaction.Commit();
 
         return updated;
@@ -272,6 +292,16 @@ ORDER BY RTRIM(ct.Title) ASC";
 
         try
         {
+            // Read before deleting; once the row is gone its CourseId is the only human-readable
+            // trace the trail can keep.
+            var deleting = await GetByIdAsync(connection, transaction, pkid, cancellationToken);
+
+            if (deleting is null)
+            {
+                transaction.Rollback();
+                return CourseDeleteResult.NotFound;
+            }
+
             // Both junctions declare ON DELETE CASCADE; clearing them here keeps the intent explicit.
             await connection.ExecuteAsync(new CommandDefinition(
                 "DELETE FROM dbo.CourseJobCategories WHERE Course_pkid = @Pkid",
@@ -285,15 +315,17 @@ ORDER BY RTRIM(ct.Title) ASC";
                 transaction,
                 cancellationToken: cancellationToken));
 
-            var affected = await connection.ExecuteAsync(new CommandDefinition(
+            await connection.ExecuteAsync(new CommandDefinition(
                 "DELETE FROM dbo.Course WHERE pkid = @Pkid",
                 new { Pkid = pkid },
                 transaction,
                 cancellationToken: cancellationToken));
 
+            await _rowAudit.LogDeleteAsync(connection, transaction, AuditTableName, deleting, cancellationToken);
+
             transaction.Commit();
 
-            return affected > 0 ? CourseDeleteResult.Deleted : CourseDeleteResult.NotFound;
+            return CourseDeleteResult.Deleted;
         }
         catch (SqlException ex) when (ex.Number == ForeignKeyViolation)
         {

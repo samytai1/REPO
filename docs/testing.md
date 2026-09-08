@@ -2,10 +2,11 @@
 
 Read before writing tests, or when a test fails for a non-obvious reason.
 
-## Backend — `src\CMS.API.Tests` (369 tests)
+## Backend — `src\CMS.API.Tests` (416 tests)
 
 Controller tests against hand-written in-memory fakes in `Fakes\`; no mocking library. The two
-authorization suites are the exception — they host the real pipeline (see below).
+authorization suites are the exception — they host the real pipeline, and the three 異動紀錄 suites
+are the other one: they need a real database (see below).
 
 - A fake must mirror its SQL repository's semantics — sort order, filter breadth, n-n replace and de-duplication, blank-to-null normalisation, IDENTITY assignment — so the tests stay meaningful. `InMemoryCourseRepository` is the fullest example: it also seeds the FK targets so nav objects resolve, and exposes `JobCategoryLinks(pkid)` / `CertificationLinks(pkid)` so the n-n write tests can read the junction state.
 - Give the fake a seam for anything the SQL layer does that memory cannot: `MarkInUse(pkid)` reproduces the FK-violation delete path.
@@ -23,6 +24,10 @@ authorization suites are the exception — they host the real pipeline (see belo
 - A status code can be the feature. `ChangePassword_WithTheWrongCurrentPassword_Returns400_NOT401` and its end-to-end twin assert `IsNotType<UnauthorizedObjectResult>` as well as the 400, because a 401 there would sign the user out through the browser's error interceptor — a bug no "the message is right" assertion would catch.
 - Password specs assert against `PasswordPolicyService.PolicyMessage` and `RequiredMessage`, never a copy of the rule text, and the strength `[Theory]` runs one case per rule (short, no upper, no lower, no digit, no symbol) so a loosened rule names itself.
 - **An endpoint that acts on the caller** needs three angles, because no single one covers it. `AuthControllerTests` builds the controller with a hand-made `ClaimsPrincipal` (`SignedInAs`) and asserts the token's user is the row that changes while every other account is untouched; a reflection test asserts the request DTO has no `UserId` and no role property, which is *why* a body cannot name an account; and `AuthorizationTests` puts **raw JSON** carrying a foreign `userId` through the real pipeline, because the typed DTO cannot express that request at all. Those HTTP tests build their **own** `TestApiFactory` — they mutate the seeded user, and the class fixture is shared.
+- **異動紀錄 is the one thing a fake cannot test, so it has a real database.** The trail's central promise — "a change that is rolled back leaves no audit row" — is a promise about a *transaction*, and an in-memory fake has none. `SqlServerDatabaseFixture` creates a throwaway database per test class and drops it afterwards, building the schema by **running `database\admin.sql` itself** (copied beside the test binary by the csproj) so the tables under test cannot drift from the real ones. Never hand-write DDL in a test.
+- **`[SqlServerFact]`, not `[Fact]`, for those.** It sets `Skip` when no SQL Server answers, so a machine that has never had the CMS database still runs the other 400 tests green. The probe is one `Lazy<bool>` per run. Override the server with `CMS_TEST_SQLSERVER`.
+- The three audit suites divide the work deliberately: `RowAuditWriterTests` is pure reflection over a recording seam and touches nothing (its connection factory **throws**, so the suite cannot quietly become an integration test); `PublishStatusRepositoryAuditTests` and `AppRoleRepositoryAuditTests` drive real repositories over real SQL; `RowAuditEndToEndTests` hosts the real `Program` with **no substitutions at all** — only `ConnectionStrings:CMS` is repointed — which is the only place that proves every repository can still be *constructed* by the container, and that the trail's UserName is the one a real login's token carries.
+- **PublishStatus is the entity the audit tests use** because its key is user-supplied: inserting the same pkid twice is the cheapest way to make a write fail mid-transaction and prove nothing was recorded.
 
 ## Frontend — `src\CMS.NG` (436 tests)
 
