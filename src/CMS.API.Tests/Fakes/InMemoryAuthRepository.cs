@@ -14,6 +14,7 @@ public class InMemoryAuthRepository : IAuthRepository
 {
     private readonly Dictionary<string, AppUserCredential> _users = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<string>> _userRoles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTime> _passwordUpdatedTimes = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Seeds a user whose PasswordHash is the SHA-256 of <paramref name="password"/>.</summary>
     public InMemoryAuthRepository Seed(string userId, string userName, string password, bool isActive = true, params string[] roleIds)
@@ -88,4 +89,25 @@ public class InMemoryAuthRepository : IAuthRepository
     /// <summary>The stored row, for tests asserting on columns the wire shape never carries.</summary>
     public AppUserCredential? Stored(string userId)
         => _users.TryGetValue(userId, out var user) ? user : null;
+
+    public Task<bool> UpdatePasswordAsync(
+        string userId,
+        string passwordHash,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(userId)) return Task.FromResult(false);
+
+        if (!_users.TryGetValue(userId.Trim(), out var user)) return Task.FromResult(false);
+
+        // Mirrors the SQL SET list: the hash and the stamp, nothing else. PasswordUpdatedTime is
+        // not on AppUserCredential, so the fake keeps it alongside for the tests that assert it.
+        user.PasswordHash = passwordHash;
+        _passwordUpdatedTimes[user.UserId] = DateTime.Now;
+
+        return Task.FromResult(true);
+    }
+
+    /// <summary>When this user's password was last written, or <c>null</c> if it never was.</summary>
+    public DateTime? PasswordUpdatedTime(string userId)
+        => _passwordUpdatedTimes.TryGetValue(userId, out var stamp) ? stamp : null;
 }

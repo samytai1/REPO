@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { provideHttpClient } from '@angular/common/http';
+import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { environment } from '@environments/environment';
 
@@ -14,6 +14,7 @@ describe('AuthService', () => {
 
   const loginUrl = `${environment.apiBaseUrl}/auth/login`;
   const profileUrl = `${environment.apiBaseUrl}/auth/profile`;
+  const passwordUrl = `${environment.apiBaseUrl}/auth/password`;
 
   /** The service reads storage in its constructor, so seed it *before* asking for the instance. */
   function create(): AuthService {
@@ -230,6 +231,80 @@ describe('AuthService', () => {
 
     expect(failed).toBeTrue();
     expect(service.userName()).toBe('Admin User');
+    expect(JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY)!)).toEqual(before);
+  });
+
+  // ---------- changePassword ----------
+
+  it('PUTs the two passwords to /api/auth/password', () => {
+    signIn(['Admin'], 'Admin User');
+    create();
+
+    let completed = false;
+    service.changePassword('CMS4fun#', 'N3wP@ssw0rd').subscribe(() => (completed = true));
+
+    const request = httpMock.expectOne(passwordUrl);
+    expect(request.request.method).toBe('PUT');
+    // No userId — the API takes the account from the token — and no confirm field.
+    expect(request.request.body).toEqual({
+      currentPassword: 'CMS4fun#',
+      newPassword: 'N3wP@ssw0rd',
+    });
+
+    request.flush(null, { status: 204, statusText: 'No Content' });
+    expect(completed).toBeTrue();
+  });
+
+  it('sends passwords exactly as typed, never trimmed', () => {
+    signIn(['Admin']);
+    create();
+
+    service.changePassword('  spaced pw  ', '  Aa1! pad  ').subscribe();
+
+    const request = httpMock.expectOne(passwordUrl);
+    expect(request.request.body).toEqual({
+      currentPassword: '  spaced pw  ',
+      newPassword: '  Aa1! pad  ',
+    });
+
+    request.flush(null, { status: 204, statusText: 'No Content' });
+  });
+
+  it('leaves the session completely alone on success', () => {
+    const before = signIn(['Admin', 'User'], 'Admin User');
+    create();
+
+    service.changePassword('CMS4fun#', 'N3wP@ssw0rd').subscribe();
+    httpMock.expectOne(passwordUrl).flush(null, { status: 204, statusText: 'No Content' });
+
+    // The API keeps the token valid, so there is nothing to re-store and nobody gets signed out.
+    expect(service.profile()).toEqual(before);
+    expect(service.token()).toBe(before.accessToken);
+    expect(service.userName()).toBe('Admin User');
+    expect(service.roles()).toEqual(['Admin', 'User']);
+    expect(JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY)!)).toEqual(before);
+  });
+
+  it('passes a rejected password back to the caller as a 400', () => {
+    const before = signIn(['Admin']);
+    create();
+
+    let status: number | undefined;
+    let detail: string | undefined;
+    service.changePassword('wrong', 'N3wP@ssw0rd').subscribe({
+      error: (error: HttpErrorResponse) => {
+        status = error.status;
+        detail = (error.error as { detail?: string }).detail;
+      },
+    });
+
+    httpMock
+      .expectOne(passwordUrl)
+      .flush({ detail: '目前密碼不正確。' }, { status: 400, statusText: 'Bad Request' });
+
+    // A 400, not a 401 — a 401 would reach authErrorInterceptor and sign the user out over a typo.
+    expect(status).toBe(400);
+    expect(detail).toBe('目前密碼不正確。');
     expect(JSON.parse(sessionStorage.getItem(AUTH_SESSION_KEY)!)).toEqual(before);
   });
 

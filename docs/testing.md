@@ -2,7 +2,7 @@
 
 Read before writing tests, or when a test fails for a non-obvious reason.
 
-## Backend — `src\CMS.API.Tests` (275 tests)
+## Backend — `src\CMS.API.Tests` (311 tests)
 
 Controller tests against hand-written in-memory fakes in `Fakes\`; no mocking library. The two
 authorization suites are the exception — they host the real pipeline (see below).
@@ -16,9 +16,11 @@ authorization suites are the exception — they host the real pipeline (see belo
 - **Authorization is the exception to "test the controller directly."** A `[Fact]` calling an action never touches the middleware, so `AuthorizationTests` hosts the real `Program` through `TestApiFactory : WebApplicationFactory<Program>` and asserts over HTTP: 401 without a token, 200 with one from a real login, and 401 for a malformed, expired, foreign-signed or tampered token. Only the repositories a test reaches are swapped for fakes — an unauthenticated request is rejected before its controller is built, so the others are never resolved and the SQL connection string is never read.
 - `TestApiFactory.RotateSigningKey` rewrites the in-memory SysConfig row; the test that uses it builds its **own** factory so the rotation cannot leak into the class fixture.
 - `AuthorizationConventionTests` pins the wiring by reflection and by resolving the host's options: the fallback policy carries `DenyAnonymousAuthorizationRequirement`, Bearer is the default scheme, `IssuerSigningKey` is null while the resolver is not (a fixed key would survive a rotation), **no controller type** is `[AllowAnonymous]`, and `AuthController.Login` is the only `[AllowAnonymous]` action in the assembly. It also asserts the reflection query found the controllers, so the "only one" test cannot pass vacuously.
+- A status code can be the feature. `ChangePassword_WithTheWrongCurrentPassword_Returns400_NOT401` and its end-to-end twin assert `IsNotType<UnauthorizedObjectResult>` as well as the 400, because a 401 there would sign the user out through the browser's error interceptor — a bug no "the message is right" assertion would catch.
+- Password specs assert against `PasswordPolicyService.PolicyMessage` and `RequiredMessage`, never a copy of the rule text, and the strength `[Theory]` runs one case per rule (short, no upper, no lower, no digit, no symbol) so a loosened rule names itself.
 - **An endpoint that acts on the caller** needs three angles, because no single one covers it. `AuthControllerTests` builds the controller with a hand-made `ClaimsPrincipal` (`SignedInAs`) and asserts the token's user is the row that changes while every other account is untouched; a reflection test asserts the request DTO has no `UserId` and no role property, which is *why* a body cannot name an account; and `AuthorizationTests` puts **raw JSON** carrying a foreign `userId` through the real pipeline, because the typed DTO cannot express that request at all. Those HTTP tests build their **own** `TestApiFactory` — they mutate the seeded user, and the class fixture is shared.
 
-## Frontend — `src\CMS.NG` (376 tests)
+## Frontend — `src\CMS.NG` (393 tests)
 
 Default Karma + Jasmine. Services use `provideHttpClientTesting` with `httpMock.verify()` in `afterEach`. Components are tested through their real templates with `provideNoopAnimations()`; protected members are reached via a locally declared `…Internals` type alias rather than `as any`.
 

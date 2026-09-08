@@ -28,4 +28,16 @@ public interface IAuthRepository
         string userId,
         string userName,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Writes dbo.AppUser.PasswordHash for <paramref name="userId"/> and stamps
+    /// <c>PasswordUpdatedTime</c>. <c>false</c> when no such user exists.
+    ///
+    /// The caller supplies an already-hashed value: a plain password never reaches the repository,
+    /// so it can never reach a SQL parameter, a log or a profiler trace.
+    /// </summary>
+    Task<bool> UpdatePasswordAsync(
+        string userId,
+        string passwordHash,
+        CancellationToken cancellationToken = default);
 }

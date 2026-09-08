@@ -104,4 +104,57 @@ public class AuthRoutingConventionTests
         Assert.Contains(StatusCodes.Status401Unauthorized, declared);
         Assert.Contains(StatusCodes.Status404NotFound, declared);
     }
+
+    // ---------- 變更密碼 ----------
+
+    [Fact]
+    public void ChangePassword_IsPutToThePasswordSubRoute()
+    {
+        var put = Action(nameof(AuthController.ChangePassword)).GetCustomAttribute<HttpPutAttribute>();
+
+        Assert.Equal("password", put!.Template);
+    }
+
+    [Fact]
+    public void ChangePassword_TakesThePasswordsFromTheBody()
+    {
+        var parameter = Action(nameof(AuthController.ChangePassword)).GetParameters()
+            .Single(p => p.ParameterType == typeof(ChangePasswordRequest));
+
+        Assert.NotNull(parameter.GetCustomAttribute<FromBodyAttribute>());
+    }
+
+    [Fact]
+    public void ChangePasswordRequest_CarriesOnlyTheCurrentAndNewPassword()
+    {
+        var properties = typeof(ChangePasswordRequest).GetProperties().Select(p => p.Name).OrderBy(p => p);
+
+        Assert.Equal(new[] { "CurrentPassword", "NewPassword" }, properties);
+    }
+
+    [Fact]
+    public void ChangePassword_DeclaresNoContentOnSuccess_AndHasNoResponseShapeAtAll()
+    {
+        var action = Action(nameof(AuthController.ChangePassword));
+
+        var declared = action.GetCustomAttributes<ProducesResponseTypeAttribute>()
+            .Select(a => a.StatusCode)
+            .ToList();
+
+        Assert.Contains(StatusCodes.Status204NoContent, declared);
+        Assert.DoesNotContain(StatusCodes.Status200OK, declared);
+
+        Assert.Equal(typeof(Task<IActionResult>), action.ReturnType);
+    }
+
+    [Fact]
+    public void ChangePassword_DeclaresA400ForARejectedPassword()
+    {
+        var declared = Action(nameof(AuthController.ChangePassword))
+            .GetCustomAttributes<ProducesResponseTypeAttribute>()
+            .Select(a => a.StatusCode)
+            .ToList();
+
+        Assert.Contains(StatusCodes.Status400BadRequest, declared);
+    }
 }

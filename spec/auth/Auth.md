@@ -1,5 +1,8 @@
 # Build Spec for Auth (登入／授權)
 - database schema: `.\database\auth.sql` (`AppUser`, `AppRole`, `AppUserRole`, `SysConfig`)
+- **See also `auth-authz.spec.md`** — the derived reference for how auth and authz actually behave
+  now, including the enforcement matrix and the residual risks. This file is the build history; that
+  one is the contract.
 
 Auth is **not** a CRUD feature. There is no `Auth` table, no list / detail / form triple and no
 `/api/lookups` entry. It is two endpoints plus the request-pipeline and app-shell wiring that makes
@@ -12,7 +15,9 @@ This spec covers three rounds of work, in the order they were built:
 2. **Locking down** — bearer validation, global authorization, the login page, the HTTP
    interceptors, the route guard, logout, and the role-gated sidebar.
 3. **個人資料 My Profile** — `PUT /api/auth/profile`, the header user menu, and the `/profile` page:
-   the signed-in user renames themselves, and nothing else.
+   the signed-in user renames themselves.
+4. **變更密碼** — `PUT /api/auth/password` and a second card on the same page: the signed-in user
+   changes their own password, after proving they know the current one.
 
 ---
 
@@ -41,6 +46,7 @@ This spec covers three rounds of work, in the order they were built:
 |--------|-------|-------|
 | `POST` | `/api/auth/login` | `{ userId, password }` → 200 `{ userId, userName, accessToken }` · 400 invalid model · **401 for every credential failure** |
 | `PUT` | `/api/auth/profile` | `{ userName }` → 200 `{ userId, userName }` · 400 empty / whitespace name · 401 no or bad token · 404 the token's account is gone |
+| `PUT` | `/api/auth/password` | `{ currentPassword, newPassword }` → **204 no body** · **400 for every rejection** · 401 no or bad token · 404 the account is gone or disabled |
 
 `api/auth` is the one route that is not a kebab-case plural, because it is not a table.
 `Login` is also the one `[AllowAnonymous]` **action** — the attribute sits on the method, never on
@@ -91,6 +97,30 @@ The one endpoint that writes, and it writes exactly one column of exactly one ro
 - **`UserProfileResponse` is `{ userId, userName }`.** No PasswordHash; no roles either, because a
   rename does **not** re-issue a token, so nothing about the caller's authority changes.
 
+### 變更密碼 — `PUT /api/auth/password`
+
+- **Every rejection is a 400, never a 401.** This is the rule the whole feature hangs on. To
+  `authErrorInterceptor` a 401 outside `/auth/login` means "session expired": it clears the session
+  and redirects to `/login`. A mistyped 目前密碼 answered with 401 would therefore sign the user out
+  instead of telling them. `PasswordRejected` is the single helper for these, and its
+  `ProblemDetails.Detail` is meant to be shown verbatim: 目前密碼不正確。/ 新密碼不可與目前密碼相同。
+  / the policy message. The one 401 left is a token with no `userId` claim.
+- **Order of checks:** model state → userId claim → account exists and is active → current password
+  matches → new password differs from it → policy. Nothing is written until all of them pass.
+- **Strength is `IPasswordPolicyService`**, not a data annotation, because the rules are switched by
+  `enforcePasswordPolicy` in dbo.SysConfig['appConfig'] — the same JSON as the signing key, read on
+  every call so a flip needs no restart. It **fails closed**: a missing row, unreadable JSON or an
+  absent property all read as enforced. On: `MinimumLength` (8) plus upper, lower, digit and symbol.
+  Off: non-empty. Tests assert `PasswordPolicyService.PolicyMessage`, never the literal text.
+- **Neither password is ever trimmed** — a legitimate password that begins or ends with a space has
+  to stay typeable. UserName is trimmed; passwords are not.
+- **204 with no body.** `UpdatePasswordAsync` takes an already-hashed value, so a plain password
+  never reaches a SQL parameter, a log or a profiler trace, and it stamps
+  `PasswordUpdatedTime = SYSDATETIME()` — the first thing in the app to write that column.
+- **The session survives.** No revocation exists, so forcing a re-login would imply an invalidation
+  that does not actually happen on the user's other devices. The caller's own token keeps working
+  on the very next request, which is asserted.
+
 ## Authorization (backend)
 
 - **Closed by default.** `Program.cs` sets an `AuthorizationOptions.FallbackPolicy` of
@@ -126,7 +156,8 @@ The one endpoint that writes, and it writes exactly one column of exactly one ro
   `/featured-promo-items` — the 首頁 Home landing page — rather than `/app-roles`, which is
   Admin-only in the menu.
 - `core/models/auth.model.ts` — `LoginRequest`, `AuthProfile`, `UpdateProfileRequest`,
-  `UserProfile`. None of them has a `roles` field: the roles ride inside the token.
+  `UserProfile`, `ChangePasswordRequest`. None of them has a `roles` field: the roles ride inside
+  the token, and none has a `userId` on the write side: the API takes the account from the token.
 - `core/services/auth.service.ts` — owns the session. The profile lives in **session** storage under
   `cms-auth`, so it dies with the tab. Exports `AUTH_SESSION_KEY`, `LOGIN_ROUTE` (`/login`),
   `PROFILE_ROUTE` (`/profile`) and `DEFAULT_ROUTE` (`/featured-promo-items`) so nothing hard-codes
@@ -141,6 +172,9 @@ The one endpoint that writes, and it writes exactly one column of exactly one ro
     into the stored profile, keeping `accessToken` as it is. The API does not re-issue a token, so
     `userId` and the roles are unchanged; the header updates because it reads the `userName`
     signal. Store what came back, not what was typed.
+  - `changePassword(current, next)` PUTs `{ currentPassword, newPassword }` and **touches the
+    session not at all** — the API answers 204 and keeps the token valid, so there is nothing to
+    re-store and nobody is signed out. Passwords go exactly as typed, never trimmed.
 - `core/utils/jwt.util.ts` — decodes (never verifies) the payload. `rolesFromToken` flattens both
   claim shapes: one role serialises as a bare string, several as an array. Base64url is padded and
   percent-unescaped so a Chinese `userName` survives the round trip.
@@ -165,6 +199,20 @@ The one endpoint that writes, and it writes exactly one column of exactly one ro
   one; a note says 帳號與角色由系統管理員維護，無法自行修改。 使用者名稱 is the one control:
   required, trimmed, and trimmed-to-empty refused before the request with the same message the
   API's 400 carries. 取消 restores the name the session still holds.
+
+  A **second, independent form** on the same page is 變更密碼: 目前密碼 / 新密碼 / 確認新密碼, all
+  `type="password"`. Independent matters — a failure in one card must not discard what was typed in
+  the other, and a name save must send no password request.
+
+  **The form does not restate the strength rules.** `enforcePasswordPolicy` lives in SysConfig,
+  which the browser cannot see, so the form validates only "filled in" and "the two new entries
+  match" (a cross-field validator, 兩次輸入的新密碼不一致。) and renders the policy as hint text
+  above the fields. Everything else comes back as a **400** whose `ProblemDetails.detail` is shown
+  verbatim in `.profile__error`. Encoding the rules here as well would let the two drift apart —
+  and would be wrong outright the moment the flag is turned off.
+
+  On success the boxes are emptied, so the secrets are not left sitting in the DOM; on failure what
+  was typed stays, so it can be corrected. 取消 clears both the boxes and the message.
 - `app.ts` / `app.html` — the shell chrome renders only when signed in. The header's `userName` is
   the trigger for a **user menu** (`p-menu`, `[popup]`, model `App.userMenuItems`): 個人資料 as a
   `routerLink`, 登出 as a `command`, because signing out has to clear the session *before* the
@@ -188,8 +236,18 @@ The one endpoint that writes, and it writes exactly one column of exactly one ro
   user is the row that changes, every other account is untouched, the key / roles / IsActive /
   PasswordHash are all unchanged, the name is trimmed, empty and whitespace both 400 without
   writing, no `userId` claim → 401, a vanished account → 404, and the two DTO shapes.
-  `AuthRoutingConventionTests` pins `api/auth` + `login` + `profile` + `[FromBody]`, and that
-  `UpdateProfileRequest` carries `UserName` and nothing else.
+  `AuthRoutingConventionTests` pins `api/auth` + `login` + `profile` + `password` + `[FromBody]`,
+  that `UpdateProfileRequest` carries `UserName` and `ChangePasswordRequest` the two passwords and
+  nothing else, and that ChangePassword declares 204 (and **not** 200) and returns a bare
+  `IActionResult` — there is no shape a password endpoint could return.
+  Its 變更密碼 half covers: the hash is rewritten for the token's user and nobody else,
+  `PasswordUpdatedTime` is stamped, name / roles / IsActive are untouched, the wrong current
+  password is **400 and asserted not to be 401**, a new password equal to the current one is
+  refused, a `[Theory]` over one case per strength rule, another over passwords that pass
+  (including the 8-character boundary and one padded with spaces that must survive untrimmed), the
+  policy switched off accepting a weak password but still refusing a blank one, an unreadable
+  config **failing closed**, 401 with no userId claim, 404 for a deleted and for a disabled
+  account, and the round trip that matters — the new password logs in, the old one does not.
 - Backend `AuthorizationTests` (25, counting the theory cases) hosts the real pipeline through
   `TestApiFactory : WebApplicationFactory<Program>` — a `[Fact]` calling an action directly would
   never reach the middleware. Covers: 401 with no token and a `Bearer` challenge header; a `[Theory]`
@@ -200,7 +258,11 @@ The one endpoint that writes, and it writes exactly one column of exactly one ro
   Swagger stays reachable unauthenticated. 個人資料 is exercised here too, because a **raw JSON**
   body carrying a foreign `userId` and a role list is a request the typed DTO cannot express: helen
   renames herself, admin is untouched, helen gains no role. Those tests build their own factory —
-  they mutate the seeded user.
+  they mutate the seeded user. 變更密碼 is covered the same way: the new password really does log
+  in afterwards and the old one does not, a wrong current password is 400 (asserted **not** 401)
+  and writes nothing, a weak one comes back with the policy message, a raw body naming another
+  account changes only the caller's own password, the caller's token still works on the very next
+  request, and a foreign-signed token is 401 and changes nothing.
 - Backend `AuthorizationConventionTests` (8) pins the wiring: the fallback policy carries
   `DenyAnonymousAuthorizationRequirement`, Bearer is the default scheme, `IssuerSigningKey` is null
   while the resolver is not, `MapInboundClaims` is off with `RoleClaimType = "role"`, **no
@@ -227,7 +289,12 @@ The one endpoint that writes, and it writes exactly one column of exactly one ro
   one `<input>` on the page — the 未設定角色 fallback, the pre-filled name, a save that PUTs the
   trimmed `{ userName }` and lands in all three places at once, userId / roles / token unchanged
   across it, empty and whitespace refused with no request, a failed save leaving the session alone,
-  and 取消 restoring the stored name).
+  and 取消 restoring the stored name, plus 變更密碼: three `type="password"` boxes, the policy
+  hint, a PUT of the two untrimmed passwords that empties the boxes on success, the session
+  surviving intact, a mismatch and an empty box both refused **with no request**, the API's message
+  shown verbatim for a wrong current password and for a weak one, what was typed surviving a
+  failure, a generic fallback when the failure carries no detail, 取消 clearing both, and the two
+  forms staying independent in both directions).
 
 ## Deferred
 
@@ -236,9 +303,17 @@ The one endpoint that writes, and it writes exactly one column of exactly one ro
 - **No role gate on routes.** A non-Admin who types `/app-roles` still reaches the page; the API
   serves it, because no endpoint gates on a role yet. Add `[Authorize(Roles = …)]` server-side
   first, then a role guard, if that becomes a requirement.
-- **No password change / reset.** `SysConfig.defaultPassword` and `enforcePasswordPolicy` are read
-  by nothing; `AppUser.PasswordUpdatedTime` is never written. 個人資料 renames only — a 變更密碼
-  section would be the natural place for it.
+- **No password *reset*.** 變更密碼 needs the current password, so a user who has forgotten theirs
+  still needs an administrator and a SQL statement. `SysConfig.defaultPassword` is still read by
+  nothing — it would be the seed for an admin-driven reset, whenever AppUser gets a CRUD feature.
+- **PasswordHash is still a bare SHA-256 hex digest**, unsalted and fast, which is not what a
+  password should be stored with in 2026. It is the established shape of the column and every
+  existing row, so changing it is its own migration: add an algorithm marker, verify against the
+  old scheme, and re-hash on next login. 變更密碼 deliberately did not start that.
+- **A password change does not invalidate tokens** — not the caller's, and not any other device's.
+  There is no revocation to hook into: one global signing secret, and rotating it would sign
+  *everyone* out. A per-user token version in dbo.AppUser, checked during validation, is the
+  shape that would fix it.
 - **A rename leaves the token's `userName` claim stale.** Nothing reads it — the app takes the name
   from the stored profile, and the API takes the account from `userId` — so the claim is simply out
   of date until the next login. Re-issuing a token on rename would fix it and is not worth the

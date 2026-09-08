@@ -98,6 +98,7 @@ builder.Services.AddScoped<IPromotion2Repository, Promotion2Repository>();
 builder.Services.AddScoped<IAuthRepository, AuthRepository>();
 builder.Services.AddScoped<ISysConfigRepository, SysConfigRepository>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddScoped<IPasswordPolicyService, PasswordPolicyService>();
 
 var app = builder.Build();
 

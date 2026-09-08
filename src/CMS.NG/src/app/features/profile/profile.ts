@@ -1,5 +1,12 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, signal } from '@angular/core';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import {
+  AbstractControl,
+  FormBuilder,
+  ReactiveFormsModule,
+  ValidationErrors,
+  Validators,
+} from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TagModule } from 'primeng/tag';
@@ -8,15 +15,15 @@ import { MessageService } from 'primeng/api';
 import { AuthService } from '@core/services';
 
 /**
- * 個人資料 My Profile — the signed-in user's own record.
+ * 個人資料 My Profile — the signed-in user's own record, and the two things they may change about
+ * it: their 使用者名稱 and their 密碼.
  *
- * Everything on this page already lives in the session: 帳號 and 使用者名稱 come from the stored
- * profile, and the roles are decoded out of the access token — there is no GET endpoint and no
- * second request, exactly as the sidebar's role gate works.
+ * Everything shown read-only already lives in the session: 帳號 comes from the stored profile and
+ * the roles are decoded out of the access token — there is no GET endpoint and no second request,
+ * exactly as the sidebar's role gate works.
  *
- * 使用者名稱 is the only editable field. 帳號 and the roles are rendered read-only because the API
- * takes the account from the bearer token and never from the request body: sending them would
- * change nothing, so the form does not offer them.
+ * The two forms are independent. Saving a name never touches the password, and vice versa, so a
+ * failure in one leaves the other exactly as the user left it.
  */
 @Component({
   selector: 'app-profile',
@@ -36,10 +43,28 @@ export class Profile {
   protected readonly userName = this.auth.userName;
 
   protected readonly saving = signal(false);
+  protected readonly changingPassword = signal(false);
+
+  /**
+   * The server's reason for refusing a password, shown verbatim. The API owns the strength rules —
+   * they are switched on and off by `enforcePasswordPolicy` in SysConfig, which the browser cannot
+   * see — so the form checks only "filled in" and "both new entries match" and lets the 400 say the
+   * rest. Encoding the rules here as well would let the two drift apart.
+   */
+  protected readonly passwordError = signal<string | null>(null);
 
   protected readonly form = this.fb.nonNullable.group({
     userName: [this.auth.userName(), [Validators.required, Validators.maxLength(200)]],
   });
+
+  protected readonly passwordForm = this.fb.nonNullable.group(
+    {
+      currentPassword: ['', [Validators.required]],
+      newPassword: ['', [Validators.required]],
+      confirmPassword: ['', [Validators.required]],
+    },
+    { validators: newPasswordsMatch },
+  );
 
   /** 未設定角色 rather than an empty row when the token carries no `role` claim. */
   protected readonly hasRoles = computed(() => this.roles().length > 0);
@@ -47,6 +72,22 @@ export class Profile {
   protected isInvalid(): boolean {
     const control = this.form.controls.userName;
     return (control.invalid || control.value.trim() === '') && (control.dirty || control.touched);
+  }
+
+  protected isPasswordInvalid(controlName: keyof typeof this.passwordForm.controls): boolean {
+    const control = this.passwordForm.controls[controlName];
+    return control.invalid && (control.dirty || control.touched);
+  }
+
+  /** True once both new-password boxes have been filled in and they still disagree. */
+  protected get passwordsMismatch(): boolean {
+    const { newPassword, confirmPassword } = this.passwordForm.controls;
+
+    return (
+      this.passwordForm.hasError('passwordMismatch') &&
+      confirmPassword.value !== '' &&
+      (newPassword.dirty || confirmPassword.dirty || confirmPassword.touched)
+    );
   }
 
   protected save(): void {
@@ -87,4 +128,69 @@ export class Profile {
   protected reset(): void {
     this.form.reset({ userName: this.auth.userName() });
   }
+
+  protected changePassword(): void {
+    this.passwordError.set(null);
+
+    if (this.passwordForm.invalid) {
+      this.passwordForm.markAllAsTouched();
+      return;
+    }
+
+    // Passwords travel exactly as typed. Trimming would make a legitimate password un-typeable.
+    const { currentPassword, newPassword } = this.passwordForm.getRawValue();
+
+    this.changingPassword.set(true);
+
+    this.auth.changePassword(currentPassword, newPassword).subscribe({
+      next: () => {
+        this.changingPassword.set(false);
+        // The session survives, so there is nothing to re-read — just clear the secrets from the
+        // form so they are not left sitting in the DOM.
+        this.clearPasswordForm();
+        this.messageService.add({
+          severity: 'success',
+          summary: '已儲存',
+          detail: '密碼已更新。',
+        });
+      },
+      error: (error: unknown) => {
+        this.changingPassword.set(false);
+        this.passwordError.set(rejectionMessage(error));
+      },
+    });
+  }
+
+  /** 取消 on the password card — empties every box and drops any message. */
+  protected resetPassword(): void {
+    this.passwordError.set(null);
+    this.clearPasswordForm();
+  }
+
+  private clearPasswordForm(): void {
+    this.passwordForm.reset({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  }
+}
+
+/** Cross-field rule: the two new-password boxes must agree before anything is sent. */
+function newPasswordsMatch(group: AbstractControl): ValidationErrors | null {
+  const newPassword = group.get('newPassword')?.value as string | undefined;
+  const confirmPassword = group.get('confirmPassword')?.value as string | undefined;
+
+  return newPassword === confirmPassword ? null : { passwordMismatch: true };
+}
+
+/**
+ * The message to show for a refused password change. A 400 carries the server's own reason in
+ * `ProblemDetails.detail` — 目前密碼不正確, the strength rule, or "same as the current one" — and
+ * that text is written for the user, so it is shown as-is.
+ */
+function rejectionMessage(error: unknown): string {
+  if (error instanceof HttpErrorResponse && error.status === 400) {
+    const detail = (error.error as { detail?: unknown } | null)?.detail;
+
+    if (typeof detail === 'string' && detail.trim() !== '') return detail;
+  }
+
+  return '密碼更新失敗，請稍後再試。';
 }

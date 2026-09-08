@@ -96,4 +96,31 @@ WHERE   u.UserId = @UserId",
 
         return updated;
     }
+
+    public async Task<bool> UpdatePasswordAsync(
+        string userId,
+        string passwordHash,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(userId)) return false;
+
+        var parameters = new DynamicParameters();
+        parameters.Add("UserId", userId.Trim());
+        parameters.Add("PasswordHash", passwordHash);
+
+        using var connection = await _connectionFactory.CreateOpenConnectionAsync(cancellationToken);
+
+        // One statement, so it is atomic on its own and there is nothing to re-read — a password is
+        // never returned. PasswordUpdatedTime is stamped here rather than passed in, so the row
+        // records when the database actually changed.
+        var affected = await connection.ExecuteAsync(new CommandDefinition(@"
+UPDATE  dbo.AppUser
+SET     PasswordHash        = @PasswordHash,
+        PasswordUpdatedTime = SYSDATETIME()
+WHERE   UserId = @UserId",
+            parameters,
+            cancellationToken: cancellationToken));
+
+        return affected > 0;
+    }
 }

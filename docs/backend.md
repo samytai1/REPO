@@ -56,9 +56,9 @@ Read **before** writing a model, repository or controller. `CLAUDE.md` indexes t
 ## Authentication and authorization
 
 `AuthController` holds the endpoints that are not a CRUD table, so it is routed at `api/auth`
-rather than a kebab-case plural: `POST /api/auth/login` and `PUT /api/auth/profile`. It is the
-reference for anything that reads credentials or config, and for anything that acts **on the
-caller**.
+rather than a kebab-case plural: `POST /api/auth/login`, `PUT /api/auth/profile` and
+`PUT /api/auth/password`. It is the reference for anything that reads credentials or config, and
+for anything that acts **on the caller**.
 
 ### Issuing a token
 
@@ -131,3 +131,33 @@ own** row. Copy it rather than inventing a shape.
 - The response is its own narrow model. `UserProfileResponse` is `{ UserId, UserName }`: no
   PasswordHash, and no roles either — those ride in the token's `role` claims, so a rename does not
   re-issue one and nothing about the caller's authority changes.
+
+### 變更密碼 — and the status code it lives or dies by
+
+`PUT /api/auth/password` follows every rule above, plus these.
+
+- **A rejected password is a 400, never a 401.** The Angular `authErrorInterceptor` treats any 401
+  outside `/auth/login` as "your session expired": it clears the session and redirects to `/login`.
+  Answering a mistyped 目前密碼 with 401 would therefore sign the user out mid-change instead of
+  showing them the message. `AuthController.PasswordRejected` is the one helper for these, and its
+  `ProblemDetails.Detail` is written to be shown verbatim. The only 401 left is a token with no
+  `userId` claim at all, where signing out is the right answer.
+- **Knowing the current password is the gate.** `PasswordHasher.Matches` checks it before anything
+  is written, and the new password must differ from it.
+- **Strength is `IPasswordPolicyService`, not a data annotation.** `PasswordPolicyService` reads
+  `enforcePasswordPolicy` out of the same SysConfig JSON as the signing key, on every call, so
+  flipping it needs no restart. It **fails closed**: a missing row, unreadable JSON or an absent
+  property all mean "enforced", because a configuration mistake must not quietly switch the rules
+  off. When on: `MinimumLength` (8) plus an upper-case letter, a lower-case letter, a digit and a
+  symbol. When off: non-empty. Assert against `PasswordPolicyService.PolicyMessage`, never a
+  literal.
+- **Passwords are never trimmed**, on either side of the wire — trimming would make a legitimate
+  password that starts or ends with a space impossible to type again. Contrast `UserName`, which is
+  trimmed.
+- **The success answer is 204 with no body**, which is the strongest form of "no password, hashed
+  or not, travels back". The repository takes an already-hashed value, so a plain password never
+  reaches a `DynamicParameters`, a log or a profiler trace, and `UpdatePasswordAsync` stamps
+  `PasswordUpdatedTime = SYSDATETIME()` alongside the hash.
+- **The session deliberately survives.** Tokens are signed with one global secret and there is no
+  revocation, so signing the user out here would only imply an invalidation that does not actually
+  happen on their other devices.

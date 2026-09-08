@@ -64,6 +64,7 @@ public class AuthorizationTests : IClassFixture<TestApiFactory>
     [InlineData("PUT", "/api/publish-statuses")]
     [InlineData("DELETE", "/api/publish-statuses/1")]
     [InlineData("PUT", "/api/auth/profile")]
+    [InlineData("PUT", "/api/auth/password")]
     public async Task EveryEndpointButLogin_Returns401_WithoutABearerToken(string method, string route)
     {
         using var client = _factory.CreateClient();
@@ -335,6 +336,141 @@ public class AuthorizationTests : IClassFixture<TestApiFactory>
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Equal(TestApiFactory.AdminUserName, factory.Users.Stored(TestApiFactory.AdminUserId)!.UserName);
+    }
+
+    // ---------- 變更密碼 over the real pipeline ----------
+
+    [Fact]
+    public async Task ChangePassword_WithAToken_RewritesTheHash_AndTheNewPasswordThenLogsIn()
+    {
+        // Its own factory: this mutates the seeded user, and the class fixture is shared.
+        using var factory = new TestApiFactory();
+        using var client = factory.CreateClientWithToken(await factory.LoginAsync());
+
+        var response = await client.PutAsJsonAsync("/api/auth/password", new ChangePasswordRequest
+        {
+            CurrentPassword = TestApiFactory.AdminPassword,
+            NewPassword = "N3wP@ssw0rd"
+        });
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(0, response.Content.Headers.ContentLength ?? 0);
+
+        // The endpoint that matters: the new password is the one login now accepts.
+        Assert.False(string.IsNullOrWhiteSpace(
+            await factory.LoginAsync(TestApiFactory.AdminUserId, "N3wP@ssw0rd")));
+
+        using var stale = factory.CreateClient();
+        var oldPassword = await stale.PostAsJsonAsync("/api/auth/login", new LoginRequest
+        {
+            UserId = TestApiFactory.AdminUserId,
+            Password = TestApiFactory.AdminPassword
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, oldPassword.StatusCode);
+    }
+
+    /// <summary>
+    /// The status code the whole feature hangs on. The Angular error interceptor turns any 401
+    /// outside the login call into "your session expired" — it clears the session and redirects to
+    /// /login. So a mistyped 目前密碼 must come back 400, or changing a password with a typo would
+    /// sign the user out instead of showing them the message.
+    /// </summary>
+    [Fact]
+    public async Task ChangePassword_WithTheWrongCurrentPassword_Returns400_NotA401ThatWouldSignTheUserOut()
+    {
+        using var factory = new TestApiFactory();
+        using var client = factory.CreateClientWithToken(await factory.LoginAsync());
+
+        var response = await client.PutAsJsonAsync("/api/auth/password", new ChangePasswordRequest
+        {
+            CurrentPassword = "not-my-password",
+            NewPassword = "N3wP@ssw0rd"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.NotEqual(HttpStatusCode.Unauthorized, response.StatusCode);
+
+        var problem = await response.Content.ReadFromJsonAsync<ProblemDetailsBody>();
+        Assert.Equal("目前密碼不正確。", problem!.Detail);
+
+        // And the old password still works, so nothing was written.
+        Assert.False(string.IsNullOrWhiteSpace(await factory.LoginAsync()));
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithAWeakNewPassword_Returns400_AndNamesTheRule()
+    {
+        using var factory = new TestApiFactory();
+        using var client = factory.CreateClientWithToken(await factory.LoginAsync());
+
+        var response = await client.PutAsJsonAsync("/api/auth/password", new ChangePasswordRequest
+        {
+            CurrentPassword = TestApiFactory.AdminPassword,
+            NewPassword = "weak"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var problem = await response.Content.ReadFromJsonAsync<ProblemDetailsBody>();
+        Assert.Equal(PasswordPolicyService.PolicyMessage, problem!.Detail);
+    }
+
+    [Fact]
+    public async Task ChangePassword_CannotNameAnotherAccount_WhateverTheBodyCarries()
+    {
+        using var factory = new TestApiFactory();
+        using var client = factory.CreateClientWithToken(await factory.LoginAsync("helen", "helen-pw"));
+
+        // Raw JSON, because the typed DTO cannot express this: helen tries to reset admin.
+        using var content = new StringContent(
+            """{ "userId": "admin@example.com", "currentPassword": "helen-pw", "newPassword": "N3wP@ssw0rd" }""",
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await client.PutAsync("/api/auth/password", content);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+        // helen's own password changed; admin's did not.
+        Assert.False(string.IsNullOrWhiteSpace(await factory.LoginAsync("helen", "N3wP@ssw0rd")));
+        Assert.False(string.IsNullOrWhiteSpace(await factory.LoginAsync()));
+    }
+
+    [Fact]
+    public async Task ChangePassword_DoesNotInvalidateTheCallersOwnToken()
+    {
+        // The session deliberately survives: there is no revocation, so signing the user out here
+        // would only suggest one. The same token keeps working on the very next request.
+        using var factory = new TestApiFactory();
+        var token = await factory.LoginAsync();
+        using var client = factory.CreateClientWithToken(token);
+
+        var change = await client.PutAsJsonAsync("/api/auth/password", new ChangePasswordRequest
+        {
+            CurrentPassword = TestApiFactory.AdminPassword,
+            NewPassword = "N3wP@ssw0rd"
+        });
+        Assert.Equal(HttpStatusCode.NoContent, change.StatusCode);
+
+        var afterwards = await client.GetAsync(TestApiFactory.ProtectedRoute);
+        Assert.Equal(HttpStatusCode.OK, afterwards.StatusCode);
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithAForeignSignedToken_Returns401_AndChangesNothing()
+    {
+        using var factory = new TestApiFactory();
+        using var client = factory.CreateClientWithToken(
+            TestApiFactory.SignToken(TestApiFactory.ForeignSigningKey));
+
+        var response = await client.PutAsJsonAsync("/api/auth/password", new ChangePasswordRequest
+        {
+            CurrentPassword = TestApiFactory.AdminPassword,
+            NewPassword = "N3wP@ssw0rd"
+        });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.False(string.IsNullOrWhiteSpace(await factory.LoginAsync()));
     }
 
     // ---------- Swagger stays reachable ----------

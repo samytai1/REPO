@@ -3,7 +3,13 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { Observable, tap } from 'rxjs';
 import { environment } from '@environments/environment';
 
-import { AuthProfile, LoginRequest, UpdateProfileRequest, UserProfile } from '@core/models';
+import {
+  AuthProfile,
+  ChangePasswordRequest,
+  LoginRequest,
+  UpdateProfileRequest,
+  UserProfile,
+} from '@core/models';
 import { rolesFromToken } from '@core/utils/jwt.util';
 
 /** Session-storage slot holding the signed-in profile. */
@@ -71,6 +77,23 @@ export class AuthService {
           if (current) this.store({ ...current, userName: updated.userName });
         }),
       );
+  }
+
+  /**
+   * PUT /api/auth/password — 變更密碼 for the signed-in user.
+   *
+   * The session is deliberately **untouched**: the API keeps the token valid, so there is nothing
+   * to re-store and the user stays where they are. Nothing is returned either — the endpoint
+   * answers 204, because no password, hashed or not, travels back.
+   *
+   * A rejected password comes back as a **400** carrying the reason in `ProblemDetails.detail`, not
+   * a 401 — a 401 would reach `authErrorInterceptor` and sign the user out over a typo.
+   */
+  changePassword(currentPassword: string, newPassword: string): Observable<void> {
+    return this.http.put<void>(`${this.baseUrl}/password`, {
+      currentPassword,
+      newPassword,
+    } satisfies ChangePasswordRequest);
   }
 
   /** The access token to send as `Authorization: Bearer …`, read from storage on every call. */

@@ -31,3 +31,14 @@ export interface UserProfile {
   userId: string;
   userName: string;
 }
+
+/**
+ * 變更密碼 — request body for `PUT /api/auth/password`.
+ *
+ * No `userId`: the API takes the account from the token. No confirm field either — re-typing the
+ * new password is checked in the form, and sending it would only put the secret on the wire twice.
+ */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}

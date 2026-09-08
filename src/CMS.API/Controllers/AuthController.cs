@@ -9,12 +9,14 @@ namespace CMS.API.Controllers;
 
 /// <summary>
 /// 登入 Auth — credential check against dbo.AppUser, JWT issue, and the signed-in user's own
-/// 個人資料. Not a CRUD table, so the route is <c>/api/auth</c> rather than a kebab-case plural.
+/// 個人資料 and 變更密碼. Not a CRUD table, so the route is <c>/api/auth</c> rather than a
+/// kebab-case plural.
 ///
 /// Authorization is global (a fallback policy in <c>Program.cs</c> requires an authenticated user
 /// everywhere), so signing in has to opt back out of it. <c>[AllowAnonymous]</c> therefore sits on
 /// <see cref="Login"/> alone and **not** on the type: a class-level attribute would silently open
-/// up every action added here later, <see cref="UpdateProfile"/> included.
+/// up every action added here later, <see cref="UpdateProfile"/> and
+/// <see cref="ChangePassword"/> included.
 /// </summary>
 [ApiController]
 [Route("api/auth")]
@@ -23,11 +25,16 @@ public class AuthController : ControllerBase
 {
     private readonly IAuthRepository _repository;
     private readonly IJwtTokenService _tokenService;
+    private readonly IPasswordPolicyService _passwordPolicy;
 
-    public AuthController(IAuthRepository repository, IJwtTokenService tokenService)
+    public AuthController(
+        IAuthRepository repository,
+        IJwtTokenService tokenService,
+        IPasswordPolicyService passwordPolicy)
     {
         _repository = repository;
         _tokenService = tokenService;
+        _passwordPolicy = passwordPolicy;
     }
 
     /// <summary>
@@ -104,17 +111,64 @@ public class AuthController : ControllerBase
         var updated = await _repository.UpdateUserNameAsync(userId, userName, cancellationToken);
 
         // The token validated, but its account has since gone — the browser treats it as signed out.
-        if (updated is null)
+        return updated is null ? UserNotFound() : Ok(updated);
+    }
+
+    /// <summary>
+    /// 變更密碼 — replaces the **signed-in** user's password, once they have proved they know the
+    /// current one. The account is the one the bearer token names; the body cannot choose it.
+    ///
+    /// Every rejection here is a **400, never a 401**. To the browser's error interceptor a 401
+    /// from anything but the login call means "your session expired": it clears the session and
+    /// bounces to /login. Answering a mistyped current password with 401 would therefore sign the
+    /// user out mid-change. The single 401 left is a token carrying no userId at all, where signing
+    /// out is exactly the right answer.
+    ///
+    /// The session survives a successful change. Tokens are signed with one global secret and there
+    /// is no revocation, so forcing a re-login here would imply an invalidation that does not
+    /// actually happen on any other device.
+    /// </summary>
+    [Authorize]
+    [HttpPut("password")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ChangePassword(
+        [FromBody] ChangePasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var userId = CurrentUserId();
+
+        if (string.IsNullOrWhiteSpace(userId)) return InvalidCredentials();
+
+        var credential = await _repository.GetCredentialAsync(userId, cancellationToken);
+
+        // A disabled account is treated exactly like a deleted one: the token still validates, but
+        // there is nothing here left to change.
+        if (credential is null || !credential.IsActive) return UserNotFound();
+
+        if (!PasswordHasher.Matches(request.CurrentPassword, credential.PasswordHash))
         {
-            return NotFound(new ProblemDetails
-            {
-                Status = StatusCodes.Status404NotFound,
-                Title = "User not found",
-                Detail = "查無使用者資料。"
-            });
+            return PasswordRejected("目前密碼不正確。");
         }
 
-        return Ok(updated);
+        if (PasswordHasher.Matches(request.NewPassword, credential.PasswordHash))
+        {
+            return PasswordRejected("新密碼不可與目前密碼相同。");
+        }
+
+        var policyError = await _passwordPolicy.ValidateAsync(request.NewPassword, cancellationToken);
+
+        if (policyError is not null) return PasswordRejected(policyError);
+
+        var changed = await _repository.UpdatePasswordAsync(
+            credential.UserId, PasswordHasher.Hash(request.NewPassword), cancellationToken);
+
+        // Nothing to return: a password, hashed or not, never travels back.
+        return changed ? NoContent() : UserNotFound();
     }
 
     /// <summary>
@@ -134,5 +188,26 @@ public class AuthController : ControllerBase
             Status = StatusCodes.Status401Unauthorized,
             Title = "Invalid credentials",
             Detail = "帳號或密碼錯誤。"
+        });
+
+    /// <summary>The token validated, but the account it names is gone or disabled.</summary>
+    private NotFoundObjectResult UserNotFound()
+        => NotFound(new ProblemDetails
+        {
+            Status = StatusCodes.Status404NotFound,
+            Title = "User not found",
+            Detail = "查無使用者資料。"
+        });
+
+    /// <summary>
+    /// A password change the server refused. Deliberately a 400: see <see cref="ChangePassword"/>
+    /// for why a 401 here would sign the user out. <paramref name="detail"/> is shown verbatim.
+    /// </summary>
+    private BadRequestObjectResult PasswordRejected(string detail)
+        => BadRequest(new ProblemDetails
+        {
+            Status = StatusCodes.Status400BadRequest,
+            Title = "Password rejected",
+            Detail = detail
         });
 }

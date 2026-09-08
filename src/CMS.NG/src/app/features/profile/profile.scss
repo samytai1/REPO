@@ -1,5 +1,5 @@
-/* One narrow column: a two-field page at full width leaves a 1200px-wide text box. The header
-   card is capped to the same width, so the two do not read as misaligned. */
+/* One narrow column: a page of short fields at full width leaves a 1200px-wide text box. The header
+   card is capped to the same width, so the cards do not read as misaligned. */
 .profile {
   &__header,
   &__section {
@@ -20,10 +20,26 @@
     margin: 1rem 0 0;
     color: #94a3b8;
     font-size: 0.8rem;
+
+    /* The policy sits under the heading, before the fields, so it is read before typing. */
+    &--policy {
+      margin: 0 0 1.25rem;
+    }
   }
 
   &__edit-title {
     margin-top: 1.5rem;
+  }
+
+  /* The server's reason for refusing a password — 目前密碼不正確, the strength rule, and so on. */
+  &__error {
+    margin-top: 1rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid #fecaca;
+    border-radius: 6px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 0.875rem;
   }
 
   &__actions {

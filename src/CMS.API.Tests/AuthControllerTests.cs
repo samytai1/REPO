@@ -32,6 +32,14 @@ public class AuthControllerTests
     }
     """;
 
+    /// <summary>Same config with the strength rules switched off.</summary>
+    private static readonly string PolicyOffConfigJson = $$"""
+    {
+      "symmetricSecurityKey": "{{SigningKey}}",
+      "enforcePasswordPolicy": false
+    }
+    """;
+
     /// <summary>admin (active, two roles), helen (active, no roles) and retired (disabled).</summary>
     private static InMemoryAuthRepository SeededRepository()
         => new InMemoryAuthRepository()
@@ -44,7 +52,10 @@ public class AuthControllerTests
         InMemorySysConfigRepository? sysConfig = null)
     {
         var config = sysConfig ?? new InMemorySysConfigRepository().Seed("appConfig", AppConfigJson);
-        return new AuthController(repository ?? SeededRepository(), new JwtTokenService(config));
+        return new AuthController(
+            repository ?? SeededRepository(),
+            new JwtTokenService(config),
+            new PasswordPolicyService(config));
     }
 
     private static LoginRequest Login(string userId, string password)
@@ -339,8 +350,20 @@ public class AuthControllerTests
         InMemoryAuthRepository repository,
         string? userId,
         params string[] roleIds)
+        => SignedInAsWith(repository, null, userId, roleIds);
+
+    /// <summary>
+    /// <see cref="SignedInAs"/> over a specific dbo.SysConfig — for the 變更密碼 tests, which turn
+    /// <c>enforcePasswordPolicy</c> off or corrupt the row outright. A separate name rather than an
+    /// optional parameter, because <c>params</c> has to stay last.
+    /// </summary>
+    private static AuthController SignedInAsWith(
+        InMemoryAuthRepository repository,
+        InMemorySysConfigRepository? sysConfig,
+        string? userId,
+        params string[] roleIds)
     {
-        var controller = ControllerFor(repository);
+        var controller = ControllerFor(repository, sysConfig);
 
         var claims = new List<Claim>();
         if (userId is not null)
@@ -492,6 +515,261 @@ public class AuthControllerTests
 
         // No PasswordHash, and no roles — those ride in the token's `role` claims.
         Assert.Equal(new[] { "UserId", "UserName" }, properties);
+    }
+
+    // ---------- 變更密碼 PUT /api/auth/password ----------
+
+    private static ChangePasswordRequest Change(string current, string next)
+        => new() { CurrentPassword = current, NewPassword = next };
+
+    /// <summary>The policy message, so no test re-states the rule text by hand.</summary>
+    private static string PolicyMessage => PasswordPolicyService.PolicyMessage;
+
+    private static ProblemDetails AssertRejected(IActionResult result)
+    {
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        var problem = Assert.IsType<ProblemDetails>(badRequest.Value);
+        Assert.Equal(StatusCodes.Status400BadRequest, problem.Status);
+        return problem;
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithTheCorrectCurrentPassword_RewritesTheHashForTheTokenUser()
+    {
+        var repository = SeededRepository();
+        var controller = SignedInAs(repository, "admin@example.com");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", "N3wP@ssw0rd"), CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+
+        var stored = repository.Stored("admin@example.com")!;
+        Assert.Equal(PasswordHasher.Hash("N3wP@ssw0rd"), stored.PasswordHash);
+        Assert.True(PasswordHasher.Matches("N3wP@ssw0rd", stored.PasswordHash));
+        Assert.False(PasswordHasher.Matches("CMS4fun#", stored.PasswordHash));
+    }
+
+    [Fact]
+    public async Task ChangePassword_StampsPasswordUpdatedTime()
+    {
+        var repository = SeededRepository();
+        var controller = SignedInAs(repository, "admin@example.com");
+
+        Assert.Null(repository.PasswordUpdatedTime("admin@example.com"));
+
+        await controller.ChangePassword(Change("CMS4fun#", "N3wP@ssw0rd"), CancellationToken.None);
+
+        Assert.NotNull(repository.PasswordUpdatedTime("admin@example.com"));
+    }
+
+    [Fact]
+    public async Task ChangePassword_WritesOnlyTheTokenUser_LeavingEveryOtherAccountAlone()
+    {
+        var repository = SeededRepository();
+        var helenHashBefore = repository.Stored("helen")!.PasswordHash;
+        var controller = SignedInAs(repository, "admin@example.com");
+
+        await controller.ChangePassword(Change("CMS4fun#", "N3wP@ssw0rd"), CancellationToken.None);
+
+        Assert.Equal(helenHashBefore, repository.Stored("helen")!.PasswordHash);
+    }
+
+    [Fact]
+    public async Task ChangePassword_ChangesNeitherTheNameNorTheRolesNorIsActive()
+    {
+        var repository = SeededRepository();
+        var controller = SignedInAs(repository, "admin@example.com", "Admin", "User");
+
+        await controller.ChangePassword(Change("CMS4fun#", "N3wP@ssw0rd"), CancellationToken.None);
+
+        var after = repository.Stored("admin@example.com")!;
+        Assert.Equal("Admin User", after.UserName);
+        Assert.True(after.IsActive);
+        Assert.Equal(new[] { "Admin", "User" }, await repository.GetRoleIdsAsync("admin@example.com"));
+    }
+
+    /// <summary>
+    /// The load-bearing status code. A 401 would trip the browser error interceptor, which clears
+    /// the session and redirects to /login — so a typo in 目前密碼 would sign the user out.
+    /// </summary>
+    [Fact]
+    public async Task ChangePassword_WithTheWrongCurrentPassword_Returns400_NOT401()
+    {
+        var repository = SeededRepository();
+        var hashBefore = repository.Stored("admin@example.com")!.PasswordHash;
+        var controller = SignedInAs(repository, "admin@example.com");
+
+        var result = await controller.ChangePassword(Change("not-my-password", "N3wP@ssw0rd"), CancellationToken.None);
+
+        Assert.IsNotType<UnauthorizedObjectResult>(result);
+        Assert.Equal("目前密碼不正確。", AssertRejected(result).Detail);
+        Assert.Equal(hashBefore, repository.Stored("admin@example.com")!.PasswordHash);
+    }
+
+    [Fact]
+    public async Task ChangePassword_RefusesANewPasswordEqualToTheCurrentOne()
+    {
+        var repository = SeededRepository();
+        var controller = SignedInAs(repository, "admin@example.com");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", "CMS4fun#"), CancellationToken.None);
+
+        Assert.Equal("新密碼不可與目前密碼相同。", AssertRejected(result).Detail);
+        Assert.Null(repository.PasswordUpdatedTime("admin@example.com"));
+    }
+
+    [Theory]
+    [InlineData("Sh0rt!")]          // under 8 characters
+    [InlineData("nouppercase1!")]   // no upper-case letter
+    [InlineData("NOLOWERCASE1!")]   // no lower-case letter
+    [InlineData("NoDigitsHere!")]   // no digit
+    [InlineData("NoSymbolHere1")]   // no symbol
+    public async Task ChangePassword_EnforcesTheStrengthRules_WhenThePolicyIsOn(string newPassword)
+    {
+        var repository = SeededRepository();
+        var hashBefore = repository.Stored("admin@example.com")!.PasswordHash;
+        var controller = SignedInAs(repository, "admin@example.com");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", newPassword), CancellationToken.None);
+
+        Assert.Equal(PolicyMessage, AssertRejected(result).Detail);
+        Assert.Equal(hashBefore, repository.Stored("admin@example.com")!.PasswordHash);
+    }
+
+    [Theory]
+    [InlineData("N3wP@ssw0rd")]
+    [InlineData("Aa1!aaaa")]        // exactly the 8-character minimum
+    [InlineData("  Aa1! pad  ")]    // spaces count, and are never trimmed away
+    public async Task ChangePassword_AcceptsAPasswordThatMeetsEveryRule(string newPassword)
+    {
+        var repository = SeededRepository();
+        var controller = SignedInAs(repository, "admin@example.com");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", newPassword), CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        // Stored exactly as typed — trimming would make a legitimate password un-typeable.
+        Assert.True(PasswordHasher.Matches(newPassword, repository.Stored("admin@example.com")!.PasswordHash));
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithThePolicyTurnedOff_AcceptsAWeakPassword()
+    {
+        var repository = SeededRepository();
+        var sysConfig = new InMemorySysConfigRepository().Seed("appConfig", PolicyOffConfigJson);
+        var controller = SignedInAsWith(repository, sysConfig, "admin@example.com");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", "x"), CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.True(PasswordHasher.Matches("x", repository.Stored("admin@example.com")!.PasswordHash));
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithThePolicyTurnedOff_StillRefusesABlankPassword()
+    {
+        var repository = SeededRepository();
+        var sysConfig = new InMemorySysConfigRepository().Seed("appConfig", PolicyOffConfigJson);
+        var controller = SignedInAsWith(repository, sysConfig, "admin@example.com");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", "   "), CancellationToken.None);
+
+        Assert.Equal(PasswordPolicyService.RequiredMessage, AssertRejected(result).Detail);
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithAnUnreadableConfig_KeepsThePolicyOn()
+    {
+        // Fail closed: a configuration mistake must not quietly switch the password rules off.
+        var repository = SeededRepository();
+        var sysConfig = new InMemorySysConfigRepository().Seed("appConfig", "{ not json");
+        var controller = SignedInAsWith(repository, sysConfig, "admin@example.com");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", "weak"), CancellationToken.None);
+
+        Assert.Equal(PolicyMessage, AssertRejected(result).Detail);
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithInvalidModelState_Returns400()
+    {
+        var controller = SignedInAs(SeededRepository(), "admin@example.com");
+        controller.ModelState.AddModelError(nameof(ChangePasswordRequest.NewPassword), "必填");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", string.Empty), CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.IsType<SerializableError>(badRequest.Value);
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithNoUserIdClaim_Returns401()
+    {
+        var controller = SignedInAs(SeededRepository(), userId: null);
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", "N3wP@ssw0rd"), CancellationToken.None);
+
+        Assert.IsType<UnauthorizedObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task ChangePassword_WhenTheTokenUserNoLongerExists_Returns404()
+    {
+        var controller = SignedInAs(SeededRepository(), "deleted@example.com");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", "N3wP@ssw0rd"), CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task ChangePassword_ForADisabledAccount_Returns404_AndWritesNothing()
+    {
+        var repository = SeededRepository();
+        var hashBefore = repository.Stored("retired@example.com")!.PasswordHash;
+        var controller = SignedInAs(repository, "retired@example.com");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", "N3wP@ssw0rd"), CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+        Assert.Equal(hashBefore, repository.Stored("retired@example.com")!.PasswordHash);
+    }
+
+    [Fact]
+    public async Task ChangePassword_TheNewPasswordWorksAtLogin_AndTheOldOneDoesNot()
+    {
+        // The round trip that matters: the hash written here is the one Login checks against.
+        var repository = SeededRepository();
+        var changer = SignedInAs(repository, "admin@example.com");
+        await changer.ChangePassword(Change("CMS4fun#", "N3wP@ssw0rd"), CancellationToken.None);
+
+        var loginController = ControllerFor(repository);
+
+        AssertOk(await loginController.Login(Login("admin@example.com", "N3wP@ssw0rd"), CancellationToken.None));
+        AssertUnauthorized(await loginController.Login(Login("admin@example.com", "CMS4fun#"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ChangePassword_SendsNoPasswordMaterialBack()
+    {
+        var repository = SeededRepository();
+        var controller = SignedInAs(repository, "admin@example.com");
+
+        var result = await controller.ChangePassword(Change("CMS4fun#", "N3wP@ssw0rd"), CancellationToken.None);
+
+        // 204 has no body at all, which is the strongest form of "the hash never travels back".
+        var noContent = Assert.IsType<NoContentResult>(result);
+        Assert.Equal(StatusCodes.Status204NoContent, noContent.StatusCode);
+    }
+
+    [Fact]
+    public void ChangePasswordRequest_CarriesOnlyTheTwoPasswords()
+    {
+        // No UserId: the account is the token's. No confirm field either — re-typing is a UI check,
+        // and sending it would only put the secret on the wire twice.
+        var properties = typeof(ChangePasswordRequest).GetProperties().Select(p => p.Name).OrderBy(p => p);
+
+        Assert.Equal(new[] { "CurrentPassword", "NewPassword" }, properties);
     }
 
     private static TokenValidationParameters ValidationParameters(string key) => new()
