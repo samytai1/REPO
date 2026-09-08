@@ -1,0 +1,119 @@
+<div class="page-header page-card">
+  <h1 class="page-header__title">上稿作業 FeaturedPromoItem</h1>
+  <span class="page-header__subtitle">首頁促銷版位 — 每個教育中心每天三個版位</span>
+</div>
+
+<div class="page-card featured-promo-item-list__toolbar">
+  <p-tabs [value]="activeTrainingCenterPkid() ?? ''" (valueChange)="selectTab($event)">
+    <p-tablist>
+      @for (center of trainingCenters(); track center.pkid) {
+        <p-tab [value]="center.pkid">{{ center.name }}</p-tab>
+      }
+    </p-tablist>
+  </p-tabs>
+
+  <div class="featured-promo-item-list__week">
+    <p-button
+      icon="pi pi-angle-double-left"
+      [text]="true"
+      severity="secondary"
+      ariaLabel="上一週"
+      pTooltip="上一週"
+      (onClick)="previousWeek()"
+    />
+    <span class="featured-promo-item-list__week-label">{{ weekLabel() }}</span>
+    <p-button
+      icon="pi pi-angle-double-right"
+      [text]="true"
+      severity="secondary"
+      ariaLabel="下一週"
+      pTooltip="下一週"
+      (onClick)="nextWeek()"
+    />
+    <p-button label="本週" [text]="true" size="small" (onClick)="thisWeek()" />
+  </div>
+</div>
+
+@if (loading()) {
+  <div class="page-card featured-promo-item-list__day">
+    <span class="empty-text">載入中…</span>
+  </div>
+}
+
+@for (day of days(); track day.iso) {
+  <section class="page-card featured-promo-item-list__day">
+    <h2 class="featured-promo-item-list__day-title">{{ day.label }}</h2>
+
+    @for (cell of day.slots; track cell.slot) {
+      @if (isEditing(day.iso, cell.slot)) {
+        <app-featured-promo-item-form
+          [scheduleOn]="day.iso"
+          [trainingCenterPkid]="activeTrainingCenterPkid() ?? 0"
+          [slot]="cell.slot"
+          [item]="editing()?.item ?? null"
+          [prefill]="editing()?.prefill ?? null"
+          (saved)="onSaved()"
+          (cancelled)="onCancelled()"
+        />
+      } @else {
+        <div
+          class="featured-promo-item-list__row"
+          [class.featured-promo-item-list__row--empty]="!cell.item"
+        >
+          <span class="featured-promo-item-list__slot">{{ cell.slot }}</span>
+
+          <div class="featured-promo-item-list__actions">
+            <p-button
+              icon="pi pi-plus"
+              [text]="true"
+              size="small"
+              severity="secondary"
+              ariaLabel="往下移"
+              pTooltip="往下移一個版位"
+              [disabled]="!canMoveDown(cell.item)"
+              (onClick)="cell.item && moveDown(cell.item)"
+            />
+            <p-button
+              icon="pi pi-minus"
+              [text]="true"
+              size="small"
+              severity="secondary"
+              ariaLabel="往上移"
+              pTooltip="往上移一個版位"
+              [disabled]="!canMoveUp(cell.item)"
+              (onClick)="cell.item && moveUp(cell.item)"
+            />
+            <p-button
+              [label]="cell.item ? '編輯' : '新增'"
+              [link]="true"
+              size="small"
+              (onClick)="cell.item ? openEdit(cell.item) : openNew(day.iso, cell.slot)"
+            />
+            @if (cell.item; as item) {
+              <p-button label="複製" [link]="true" size="small" (onClick)="copy(item)" />
+              <p-button
+                label="刪除"
+                [link]="true"
+                size="small"
+                severity="danger"
+                (onClick)="confirmDelete(item)"
+              />
+            } @else {
+              <p-button
+                label="貼上"
+                [link]="true"
+                size="small"
+                [disabled]="!clipboard()"
+                (onClick)="openPaste(day.iso, cell.slot)"
+              />
+            }
+          </div>
+
+          <span class="featured-promo-item-list__code">{{ cell.item?.promotion?.promoCode ?? '' }}</span>
+          <span class="featured-promo-item-list__topic">{{ cell.item?.topic ?? '' }}</span>
+          <span class="featured-promo-item-list__description">{{ cell.item?.description ?? '' }}</span>
+        </div>
+      }
+    }
+  </section>
+}

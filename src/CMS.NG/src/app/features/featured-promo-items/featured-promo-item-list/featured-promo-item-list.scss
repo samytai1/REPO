@@ -1,0 +1,94 @@
+.featured-promo-item-list {
+  &__toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.5rem;
+    margin-top: 0.75rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  &__week {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: auto;
+  }
+
+  &__week-label {
+    min-width: 8rem;
+    text-align: center;
+    font-weight: 700;
+  }
+
+  &__day {
+    margin-top: 0.75rem;
+    padding-top: 0.6rem;
+    padding-bottom: 0.6rem;
+  }
+
+  &__day-title {
+    margin: 0 0 0.5rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    background: var(--app-content-bg);
+    font-size: 0.95rem;
+    font-weight: 700;
+  }
+
+  &__row {
+    display: grid;
+    grid-template-columns: 1.5rem auto minmax(10rem, 1fr) minmax(12rem, 1.4fr) minmax(16rem, 2.5fr);
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.15rem 0.35rem;
+    border-radius: 6px;
+
+    &:hover {
+      background: rgb(15 23 42 / 3%);
+    }
+
+    &--empty {
+      color: #94a3b8;
+    }
+  }
+
+  &__slot {
+    font-weight: 700;
+    text-align: center;
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 0;
+  }
+
+  &__code,
+  &__topic,
+  &__description {
+    min-height: 1.75rem;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid rgb(15 23 42 / 12%);
+    border-radius: 6px;
+    background: #fff;
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 64rem) {
+    &__row {
+      grid-template-columns: 1.5rem auto;
+    }
+
+    &__code,
+    &__topic,
+    &__description {
+      grid-column: 1 / -1;
+      white-space: normal;
+    }
+  }
+}

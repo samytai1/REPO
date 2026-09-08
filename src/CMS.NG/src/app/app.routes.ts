@@ -16,5 +16,16 @@ export const routes: Routes = [
     path: 'partners',
     loadChildren: () => import('@features/partners/partners.routes').then((m) => m.partnerRoutes),
   },
+  {
+    path: 'courses',
+    loadChildren: () => import('@features/courses/courses.routes').then((m) => m.courseRoutes),
+  },
+  {
+    path: 'featured-promo-items',
+    loadChildren: () =>
+      import('@features/featured-promo-items/featured-promo-items.routes').then(
+        (m) => m.featuredPromoItemRoutes,
+      ),
+  },
   { path: '**', redirectTo: 'app-roles' },
 ];

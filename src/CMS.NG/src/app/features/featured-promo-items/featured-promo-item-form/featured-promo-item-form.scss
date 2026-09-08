@@ -1,0 +1,24 @@
+.featured-promo-item-form {
+  margin: 0.35rem 0 0.6rem 2.5rem;
+  padding: 0.85rem 1rem 0.5rem;
+  border: 2px solid var(--app-heading);
+  border-radius: 8px;
+  background: #fff;
+
+  &__title {
+    margin-bottom: 0.75rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+  }
+}
+
+:host ::ng-deep .w-full {
+  width: 100%;
+}

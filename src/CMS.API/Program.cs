@@ -47,6 +47,13 @@ builder.Services.AddScoped<IAppRoleRepository, AppRoleRepository>();
 builder.Services.AddScoped<IAppUserRepository, AppUserRepository>();
 builder.Services.AddScoped<IPublishStatusRepository, PublishStatusRepository>();
 builder.Services.AddScoped<IPartnerRepository, PartnerRepository>();
+builder.Services.AddScoped<ICourseRepository, CourseRepository>();
+builder.Services.AddScoped<ICourseGroupRepository, CourseGroupRepository>();
+builder.Services.AddScoped<IJobCategoryRepository, JobCategoryRepository>();
+builder.Services.AddScoped<ICertificationRepository, CertificationRepository>();
+builder.Services.AddScoped<IFeaturedPromoItemRepository, FeaturedPromoItemRepository>();
+builder.Services.AddScoped<ITrainingCenterRepository, TrainingCenterRepository>();
+builder.Services.AddScoped<IPromotion2Repository, Promotion2Repository>();
 
 var app = builder.Build();
 

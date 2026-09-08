@@ -19,6 +19,13 @@ export interface NavGroup {
  */
 export const NAV_GROUPS: NavGroup[] = [
   {
+    label: '首頁 Home',
+    icon: 'pi pi-home',
+    items: [
+      { label: '上稿作業 FeaturedPromoItem', icon: 'pi pi-megaphone', route: '/featured-promo-items' },
+    ],
+  },
+  {
     label: '系統管理 Admin',
     icon: 'pi pi-shield',
     items: [
@@ -29,6 +36,9 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: '課程管理 Course',
     icon: 'pi pi-book',
-    items: [{ label: '合作夥伴 Partner', icon: 'pi pi-briefcase', route: '/partners' }],
+    items: [
+      { label: '課程 Course', icon: 'pi pi-book', route: '/courses' },
+      { label: '合作夥伴 Partner', icon: 'pi pi-briefcase', route: '/partners' },
+    ],
   },
 ];

@@ -1,0 +1,226 @@
+<div class="page-header page-card">
+  <h1 class="page-header__title">檢視課程</h1>
+
+  <div class="page-header__actions">
+    <p-button label="返回" icon="pi pi-arrow-left" severity="secondary" (onClick)="back()" />
+    @if (course(); as current) {
+      <p-button label="編輯" icon="pi pi-pencil" severity="success" (onClick)="edit()" />
+    }
+  </div>
+</div>
+
+@if (loading()) {
+  <div class="page-card course-detail__section">
+    <span class="empty-text">載入中…</span>
+  </div>
+} @else if (course(); as current) {
+  <div class="page-card course-detail__section">
+    <h2 class="form-section__title">基本資料</h2>
+
+    <dl class="detail-grid">
+      <dt>主代碼</dt>
+      <dd>{{ current.pkid }}</dd>
+
+      <dt>課程名稱</dt>
+      <dd>{{ current.title }}</dd>
+
+      <dt>官方課程名稱</dt>
+      <dd>
+        @if (current.officialTitle) {
+          {{ current.officialTitle }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+
+      <dt>簡介代碼</dt>
+      <dd>{{ current.courseId }}</dd>
+
+      <dt>科目代碼</dt>
+      <dd>{{ current.prodCourseId }}</dd>
+
+      <dt>網址代稱</dt>
+      <dd>{{ current.friendlyUrl }}</dd>
+
+      <dt>顯示順序</dt>
+      <dd>{{ current.displayOrder }}</dd>
+    </dl>
+  </div>
+
+  <div class="page-card course-detail__section">
+    <h2 class="form-section__title">分類與狀態</h2>
+
+    <dl class="detail-grid">
+      <dt>原廠</dt>
+      <dd>
+        <a class="course-detail__link" [routerLink]="['/partners', current.partnerPkid]">
+          {{ current.partner?.name ?? current.partnerPkid }}
+          <i class="pi pi-external-link"></i>
+        </a>
+      </dd>
+
+      <dt>課程群組</dt>
+      <dd>
+        @if (current.courseGroup) {
+          {{ current.courseGroup.description }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+
+      <dt>上架狀態</dt>
+      <dd>
+        <a
+          class="course-detail__link"
+          [routerLink]="['/publish-statuses', current.publishStatusPkid]"
+        >
+          {{ current.publishStatus?.description ?? current.publishStatusPkid }}
+          <i class="pi pi-external-link"></i>
+        </a>
+      </dd>
+
+      <dt>允許重聽</dt>
+      <dd>
+        <p-tag
+          [value]="current.canRepeat ? '是' : '否'"
+          [severity]="current.canRepeat ? 'success' : 'secondary'"
+        />
+      </dd>
+    </dl>
+  </div>
+
+  <div class="page-card course-detail__section">
+    <h2 class="form-section__title">排程與費用</h2>
+
+    <dl class="detail-grid">
+      <dt>上架日期</dt>
+      <dd>{{ current.scheduleOn }}</dd>
+
+      <dt>下架日期</dt>
+      <dd>{{ current.scheduleOff }}</dd>
+
+      <dt>時數</dt>
+      <dd>{{ current.hour }}</dd>
+
+      <dt>定價</dt>
+      <dd>{{ current.listPrice | number: '1.0-0' }}</dd>
+
+      <dt>點數</dt>
+      <dd>{{ current.learningCredit | number: '1.1-1' }}</dd>
+    </dl>
+  </div>
+
+  <div class="page-card course-detail__section">
+    <h2 class="form-section__title">關聯</h2>
+
+    <dl class="detail-grid">
+      <dt>職務類別（{{ current.jobCategoryCount }}）</dt>
+      <dd>
+        @if (current.jobCategories.length) {
+          <div class="course-detail__chips">
+            @for (jobCategory of current.jobCategories; track jobCategory.pkid) {
+              <p-tag [value]="jobCategory.description" severity="info" />
+            }
+          </div>
+        } @else {
+          <span class="empty-text">尚無職務類別</span>
+        }
+      </dd>
+
+      <dt>對應認證（{{ current.certificationCount }}）</dt>
+      <dd>
+        @if (current.certifications.length) {
+          <div class="course-detail__chips">
+            @for (certification of current.certifications; track certification.pkid) {
+              <p-tag [value]="certificationLabel(certification)" severity="warn" />
+            }
+          </div>
+        } @else {
+          <span class="empty-text">尚無對應認證</span>
+        }
+      </dd>
+    </dl>
+  </div>
+
+  <div class="page-card course-detail__section">
+    <h2 class="form-section__title">課程內容</h2>
+
+    <dl class="detail-grid">
+      <dt>教材</dt>
+      <dd class="course-detail__prewrap">
+        @if (current.material) {
+          {{ current.material }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+
+      <dt>課程目標</dt>
+      <dd class="course-detail__prewrap">
+        @if (current.objective) {
+          {{ current.objective }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+
+      <dt>適合對象</dt>
+      <dd class="course-detail__prewrap">
+        @if (current.target) {
+          {{ current.target }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+
+      <dt>先備知識</dt>
+      <dd class="course-detail__prewrap">
+        @if (current.prerequisites) {
+          {{ current.prerequisites }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+
+      <dt>課程大綱</dt>
+      <dd class="course-detail__prewrap">
+        @if (current.outline) {
+          {{ current.outline }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+
+      <dt>對應認證／考試</dt>
+      <dd class="course-detail__prewrap">
+        @if (current.towardCertOrExam) {
+          {{ current.towardCertOrExam }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+
+      <dt>備註</dt>
+      <dd class="course-detail__prewrap">
+        @if (current.note) {
+          {{ current.note }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+
+      <dt>其他資訊</dt>
+      <dd class="course-detail__prewrap">
+        @if (current.otherInfo) {
+          {{ current.otherInfo }}
+        } @else {
+          <span class="empty-text">—</span>
+        }
+      </dd>
+    </dl>
+  </div>
+} @else {
+  <div class="page-card course-detail__section">
+    <span class="empty-text">查無資料</span>
+  </div>
+}

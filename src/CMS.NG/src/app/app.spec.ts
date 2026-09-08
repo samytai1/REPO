@@ -69,8 +69,25 @@ describe('App shell', () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
 
-    const link: HTMLAnchorElement = fixture.nativeElement.querySelector('a.app-nav-item');
-    expect(link.getAttribute('href')).toBe('/app-roles');
+    // Find the entry by label — the first link belongs to whichever group is listed first.
+    const links: HTMLAnchorElement[] = Array.from(
+      fixture.nativeElement.querySelectorAll('a.app-nav-item'),
+    );
+    const appRoleLink = links.find((link) => link.textContent?.includes('角色 AppRole'));
+    expect(appRoleLink?.getAttribute('href')).toBe('/app-roles');
+  });
+
+  it('links the FeaturedPromoItem menu entry, in the 首頁 Home group, to /featured-promo-items', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('首頁 Home');
+    expect(fixture.nativeElement.textContent).toContain('上稿作業 FeaturedPromoItem');
+
+    const links: HTMLAnchorElement[] = Array.from(
+      fixture.nativeElement.querySelectorAll('a.app-nav-item'),
+    );
+    expect(links.map((link) => link.getAttribute('href'))).toContain('/featured-promo-items');
   });
 
   it('collapses and expands the sidebar', () => {

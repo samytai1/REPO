@@ -1,0 +1,31 @@
+.course-detail {
+  &__section {
+    margin-top: 0.75rem;
+  }
+
+  &__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--app-accent);
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+
+    .pi {
+      font-size: 0.75rem;
+    }
+  }
+
+  &__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  &__prewrap {
+    white-space: pre-wrap;
+  }
+}

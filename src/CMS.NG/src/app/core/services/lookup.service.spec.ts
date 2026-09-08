@@ -3,7 +3,16 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { environment } from '@environments/environment';
 
-import { AppUserLookup, Partner, PublishStatus } from '@core/models';
+import {
+  AppUserLookup,
+  CertificationLookup,
+  CourseGroupLookup,
+  JobCategoryLookup,
+  Partner,
+  Promotion2Lookup,
+  PublishStatus,
+  TrainingCenterLookup,
+} from '@core/models';
 import { LookupService } from './lookup.service';
 
 describe('LookupService', () => {
@@ -80,5 +89,94 @@ describe('LookupService', () => {
     req.flush(partners);
 
     expect(result).toEqual(partners);
+  });
+
+  it('getCourseGroups() issues GET /api/lookups/course-groups', () => {
+    const groups: CourseGroupLookup[] = [
+      { pkid: 20, description: '資安' },
+      { pkid: 10, description: '雲端' },
+    ];
+
+    let result: CourseGroupLookup[] | undefined;
+    service.getCourseGroups().subscribe((value) => (result = value));
+
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/lookups/course-groups`);
+    expect(req.request.method).toBe('GET');
+    req.flush(groups);
+
+    expect(result).toEqual(groups);
+  });
+
+  it('getJobCategories() issues GET /api/lookups/job-categories', () => {
+    const categories: JobCategoryLookup[] = [
+      { pkid: 5, description: '系統管理' },
+      { pkid: 6, description: '網路管理' },
+    ];
+
+    let result: JobCategoryLookup[] | undefined;
+    service.getJobCategories().subscribe((value) => (result = value));
+
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/lookups/job-categories`);
+    expect(req.request.method).toBe('GET');
+    req.flush(categories);
+
+    expect(result).toEqual(categories);
+  });
+
+  it('getCertifications() issues GET /api/lookups/certifications', () => {
+    const certifications: CertificationLookup[] = [
+      { pkid: 100, title: 'AZ-104', partnerPkid: 1 },
+      { pkid: 300, title: null, partnerPkid: 2 },
+    ];
+
+    let result: CertificationLookup[] | undefined;
+    service.getCertifications().subscribe((value) => (result = value));
+
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/lookups/certifications`);
+    expect(req.request.method).toBe('GET');
+    req.flush(certifications);
+
+    expect(result).toEqual(certifications);
+  });
+
+  it('getTrainingCenters() issues GET /api/lookups/training-centers', () => {
+    const centers: TrainingCenterLookup[] = [
+      { pkid: 1, name: '台北', displayOrder: 1 },
+      { pkid: 2, name: '新竹', displayOrder: 2 },
+    ];
+
+    let result: TrainingCenterLookup[] | undefined;
+    service.getTrainingCenters().subscribe((value) => (result = value));
+
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/lookups/training-centers`);
+    expect(req.request.method).toBe('GET');
+    req.flush(centers);
+
+    expect(result).toEqual(centers);
+  });
+
+  it('getPromotions() issues GET /api/lookups/promotions with the trimmed keyword as a query param', () => {
+    const promotions: Promotion2Lookup[] = [
+      { pkid: 12, promoCode: '20251215_n8n', topic: 'n8n自動化三部曲', description: '從自動化新手' },
+    ];
+
+    let result: Promotion2Lookup[] | undefined;
+    service.getPromotions('  2025 ').subscribe((value) => (result = value));
+
+    const req = httpMock.expectOne(
+      (r) => r.url === `${environment.apiBaseUrl}/lookups/promotions` && r.params.get('keyword') === '2025',
+    );
+    expect(req.request.method).toBe('GET');
+    req.flush(promotions);
+
+    expect(result).toEqual(promotions);
+  });
+
+  it('getPromotions() sends no keyword param when the keyword is blank', () => {
+    service.getPromotions('   ').subscribe();
+
+    const req = httpMock.expectOne(`${environment.apiBaseUrl}/lookups/promotions`);
+    expect(req.request.params.keys()).toEqual([]);
+    req.flush([]);
   });
 });
