@@ -93,3 +93,24 @@ Silently wrong if you guess; the details are in `docs\`.
 5. **Frontend:** models → service → list/detail/form → `{table-plural}.routes.ts` → `app.routes.ts` (**with `canActivate: [authGuard, passwordChangeGuard]`** — both, in that order) → `NAV_GROUPS`. Defer link buttons whose target route does not exist and record them in the spec.
 6. **Frontend tests:** service HTTP contract + one spec per component.
 7. **Verify for real:** both suites, then run both apps and exercise the CRUD path against the database.
+
+## gstack
+
+Garry Tan's skill pack, installed at `~\.claude\skills\gstack` (untracked, machine-local).
+
+**Web browsing goes through `/browse` — always.** It is the only sanctioned way to drive a browser
+from this project. **Never call the `mcp__claude-in-chrome__*` tools**, and never reach for the
+`claude-in-chrome` skill that wraps them; `/browse` supersedes both.
+
+| Group | Skills |
+|-------|--------|
+| Plan | `/autoplan` `/office-hours` `/plan-ceo-review` `/plan-eng-review` `/plan-design-review` `/plan-devex-review` |
+| Design | `/design-consultation` `/design-shotgun` `/design-html` `/design-review` |
+| Review | `/review` `/devex-review` `/cso` `/careful` |
+| Ship | `/ship` `/land-and-deploy` `/canary` `/benchmark` |
+| Browser | `/browse` `/connect-chrome` `/setup-browser-cookies` |
+| QA | `/qa` `/qa-only` |
+| Docs & retro | `/document-release` `/document-generate` `/retro` `/investigate` `/learn` |
+| Setup | `/setup-deploy` `/setup-gbrain` `/gstack-upgrade` |
+| Freeze | `/freeze` `/guard` `/unfreeze` |
+| Other | `/codex` |
