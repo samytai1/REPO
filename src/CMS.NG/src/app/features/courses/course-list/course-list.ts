@@ -83,6 +83,24 @@ interface PageState {
   rows: number;
 }
 
+/**
+ * What `(onSort)` actually emits for a single-column sort — PrimeNG's `sortMeta`, which has no
+ * TypeScript export. `(onPage)` emits `{ first, rows }`, a subset of `TableLazyLoadEvent`.
+ */
+interface TableSortEvent {
+  field?: string;
+  order?: number;
+  sortField?: undefined;
+  sortOrder?: undefined;
+  first?: undefined;
+  rows?: undefined;
+}
+
+/** Every shape the shared sort/page handler receives; each name is declared on both so `??` can read either. */
+type TableStateEvent =
+  | (TableLazyLoadEvent & { field?: undefined; order?: undefined })
+  | TableSortEvent;
+
 /** The cell currently open for editing, plus the value to restore if the save fails. */
 interface EditingCell {
   pkid: number;
@@ -403,17 +421,33 @@ export class CourseList implements OnInit {
     this.load();
   }
 
-  /** p-table emits both sort and page changes here; both are persisted. */
-  protected onStateChange(event: TableLazyLoadEvent): void {
-    if (event.sortField) {
+  /**
+   * p-table emits both sort and page changes here; both are persisted.
+   *
+   * The two events have different shapes, and neither is the `TableLazyLoadEvent` that only
+   * `(onLazyLoad)` sends: `(onSort)` carries `{ field, order }` and `(onPage)` carries
+   * `{ first, rows }`. Reading `sortField` alone never saw a sort, and reading a missing `first`
+   * as 0 wiped the page on every sort — so both are read by whichever name the event uses.
+   */
+  protected onStateChange(event: TableStateEvent): void {
+    const sortField = event.sortField ?? event.field;
+    const sortOrder = event.sortOrder ?? event.order;
+
+    if (sortField) {
       this.sort = {
-        field: Array.isArray(event.sortField) ? event.sortField[0] : event.sortField,
-        order: event.sortOrder ?? 1,
+        field: Array.isArray(sortField) ? sortField[0] : sortField,
+        order: sortOrder ?? 1,
       };
       this.listState.write(SORT_KEY, this.sort);
     }
 
-    this.page = { first: event.first ?? 0, rows: event.rows ?? this.page.rows };
+    if (event.first !== undefined || event.rows !== undefined) {
+      this.page = { first: event.first ?? 0, rows: event.rows ?? this.page.rows };
+    } else if (sortField) {
+      // A bare sort event carries no page: the table starts a new sort order from page 1.
+      this.page = { ...this.page, first: 0 };
+    }
+
     this.listState.write(PAGE_KEY, this.page);
   }
 
