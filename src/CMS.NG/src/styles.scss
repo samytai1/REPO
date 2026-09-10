@@ -31,6 +31,17 @@
   --app-heading: #1e293b;
   /* Secondary text on white: slate-500 clears WCAG AA (4.76:1); slate-400 did not (2.56:1). */
   --app-text-muted: #64748b;
+  /* Errors and destructive actions: red-600 reads at 4.8:1 on white and under white text; red-500
+     managed 3.8:1. Also routed into PrimeNG's danger button so 刪除 matches the field errors. */
+  --app-danger: #dc2626;
+  --app-danger-hover: #b91c1c;
+  --app-danger-active: #991b1b;
+  --p-button-danger-background: var(--app-danger);
+  --p-button-danger-border-color: var(--app-danger);
+  --p-button-danger-hover-background: var(--app-danger-hover);
+  --p-button-danger-hover-border-color: var(--app-danger-hover);
+  --p-button-danger-active-background: var(--app-danger-active);
+  --p-button-danger-active-border-color: var(--app-danger-active);
   --app-table-head-bg: #e0f2fe;
 }
 
@@ -103,7 +114,7 @@ body {
 
   .required {
     margin-left: 0.15rem;
-    color: #ef4444;
+    color: var(--app-danger);
   }
 
   input,
@@ -114,8 +125,8 @@ body {
 
 .field-error {
   margin-top: 0.25rem;
-  color: #ef4444;
-  font-size: 0.75rem;
+  color: var(--app-danger);
+  font-size: 0.8rem;
 }
 
 .detail-grid {
