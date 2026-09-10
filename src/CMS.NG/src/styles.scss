@@ -165,6 +165,7 @@ form.ng-submitted {
 
   dd {
     margin: 0;
+    max-width: 60rem; /* 課程目標 and 備註 ran to 1160px — far past a readable measure. */
     font-size: 0.9rem;
   }
 }
