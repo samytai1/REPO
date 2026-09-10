@@ -186,4 +186,81 @@
     font-size: 0.7rem;
     opacity: 0.6;
   }
+
+  /* ☰ — exists only for the narrow layout below; sits at the far left of the bar. */
+  &__menu {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    margin-right: auto;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--app-heading);
+    font-size: 1.1rem;
+    cursor: pointer;
+
+    &:hover {
+      background: rgb(15 23 42 / 5%);
+    }
+  }
+}
+
+.app-sidebar-backdrop {
+  display: none;
+}
+
+/* Narrow viewports: the 15rem sidebar would leave a phone 135px of content, so it leaves the grid
+   and becomes an off-canvas drawer — opened by the top bar's ☰, closed by the backdrop or a menu
+   pick (app.ts). `collapsed` keeps its desktop meaning and is simply not consulted here. */
+@media (max-width: 64rem) {
+  .app-shell:not(.app-shell--anonymous) {
+    grid-template-columns: 1fr;
+  }
+
+  .app-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    width: var(--app-sidebar-width);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+
+  .app-shell--menu-open {
+    .app-sidebar {
+      transform: none;
+      box-shadow: 4px 0 16px rgb(15 23 42 / 35%);
+    }
+
+    .app-sidebar-backdrop {
+      display: block;
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      background: rgb(15 23 42 / 45%);
+    }
+  }
+
+  .app-topbar__menu {
+    display: inline-flex;
+  }
+
+  .app-content {
+    padding: 0.75rem;
+  }
+
+  .app-topbar {
+    margin: -0.75rem -0.75rem 0.75rem;
+    padding: 0.5rem 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell,
+  .app-sidebar {
+    transition: none;
+  }
 }

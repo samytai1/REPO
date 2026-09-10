@@ -69,11 +69,26 @@ export class App {
 
   protected readonly collapsed = signal(false);
 
+  /**
+   * Below 64rem (app.scss) the sidebar is an off-canvas drawer: hidden until the top bar's ☰ opens
+   * it, closed by the backdrop or by picking a menu entry. Independent of `collapsed`, which is the
+   * desktop icon-rail preference and keeps its meaning at every width.
+   */
+  protected readonly menuOpen = signal(false);
+
   /** Groups start expanded so the single feature is reachable in one click. */
   protected readonly expandedGroups = signal<Set<string>>(new Set(NAV_GROUPS.map((g) => g.label)));
 
   protected toggleSidebar(): void {
     this.collapsed.update((value) => !value);
+  }
+
+  protected openMenu(): void {
+    this.menuOpen.set(true);
+  }
+
+  protected closeMenu(): void {
+    this.menuOpen.set(false);
   }
 
   protected isExpanded(group: NavGroup): boolean {

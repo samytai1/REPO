@@ -1,9 +1,13 @@
 <div
   class="app-shell"
   [class.app-shell--collapsed]="collapsed()"
+  [class.app-shell--menu-open]="menuOpen()"
   [class.app-shell--anonymous]="!showChrome()"
 >
   @if (showChrome()) {
+    <!-- Narrow viewports only (app.scss): dims the page behind the open drawer and closes it on tap. -->
+    <div class="app-sidebar-backdrop" (click)="closeMenu()"></div>
+
     <aside class="app-sidebar">
       <div class="app-sidebar__brand">
         <span class="app-sidebar__brand-text">{{ brand }}</span>
@@ -38,6 +42,7 @@
                       class="app-nav-item"
                       [routerLink]="item.route"
                       routerLinkActive="app-nav-item--active"
+                      (click)="closeMenu()"
                     >
                       <i class="app-nav-item__icon" [class]="item.icon"></i>
                       <span class="app-nav-item__label">{{ item.label }}</span>
@@ -55,6 +60,11 @@
   <main class="app-content">
     @if (showChrome()) {
       <header class="app-topbar">
+        <!-- Shown only below 64rem, where the sidebar is off-canvas and needs a way in. -->
+        <button type="button" class="app-topbar__menu" aria-label="開啟選單" (click)="openMenu()">
+          <i class="pi pi-bars"></i>
+        </button>
+
         <button
           type="button"
           class="app-topbar__user"
