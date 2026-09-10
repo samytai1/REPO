@@ -13,6 +13,8 @@
   --app-content-bg: #f4f6fa;
   --app-accent: #10b981;
   --app-heading: #1e293b;
+  /* Secondary text on white: slate-500 clears WCAG AA (4.76:1); slate-400 did not (2.56:1). */
+  --app-text-muted: #64748b;
   --app-table-head-bg: #e0f2fe;
 }
 
@@ -52,7 +54,7 @@ body {
   }
 
   &__subtitle {
-    color: #94a3b8;
+    color: var(--app-text-muted);
     font-size: 0.875rem;
   }
 
@@ -118,7 +120,7 @@ body {
 }
 
 .empty-text {
-  color: #94a3b8;
+  color: var(--app-text-muted);
 }
 
 /* n-n multiselect: let the selected chips wrap instead of clipping. */
