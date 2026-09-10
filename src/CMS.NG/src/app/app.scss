@@ -163,23 +163,28 @@
   border-bottom: 1px solid rgb(15 23 42 / 8%);
   background: #fff;
 
-  /* The user menu trigger: a real <button> for keyboard access, styled back down to plain text. */
-  &__user {
-    display: inline-flex;
+  /* Both bar buttons are real <button>s for keyboard access, styled back down to plain text. */
+  &__user,
+  &__menu {
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.35rem 0.6rem;
     border: 0;
     border-radius: 6px;
     background: transparent;
     color: var(--app-heading);
-    font-family: inherit;
-    font-size: 0.875rem;
     cursor: pointer;
 
     &:hover {
       background: rgb(15 23 42 / 5%);
     }
+  }
+
+  /* The user menu trigger. */
+  &__user {
+    display: inline-flex;
+    gap: 0.5rem;
+    padding: 0.35rem 0.6rem;
+    font-family: inherit;
+    font-size: 0.875rem;
   }
 
   &__user-name {
@@ -194,21 +199,11 @@
   /* ☰ — exists only for the narrow layout below; sits at the far left of the bar. */
   &__menu {
     display: none;
-    align-items: center;
     justify-content: center;
     width: 2.25rem;
     height: 2.25rem;
     margin-right: auto;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--app-heading);
     font-size: 1.1rem;
-    cursor: pointer;
-
-    &:hover {
-      background: rgb(15 23 42 / 5%);
-    }
   }
 }
 
