@@ -4,7 +4,9 @@
 </div>
 
 <div class="page-card featured-promo-item-list__toolbar">
-  <p-tabs [value]="activeTrainingCenterPkid() ?? ''" (valueChange)="selectTab($event)">
+  <!-- Five centre tabs are 400px wide; scrollable keeps them on one line on a phone instead of
+       pushing the whole page sideways. -->
+  <p-tabs [value]="activeTrainingCenterPkid() ?? ''" (valueChange)="selectTab($event)" [scrollable]="true">
     <p-tablist>
       @for (center of trainingCenters(); track center.pkid) {
         <p-tab [value]="center.pkid">{{ center.name }}</p-tab>
