@@ -129,6 +129,21 @@ body {
   font-size: 0.8rem;
 }
 
+/* A rejected field is outlined as well as captioned. Angular stamps `ng-submitted` on the form and
+   `ng-invalid` on the control host; PrimeNG draws the border on the host itself (p-select,
+   p-multiselect) or on the first inner input (datepicker, inputnumber, autocomplete). */
+form.ng-submitted {
+  input.ng-invalid,
+  textarea.ng-invalid,
+  .ng-invalid.p-select,
+  .ng-invalid.p-multiselect,
+  .ng-invalid > .p-inputtext,
+  .ng-invalid > .p-datepicker-input,
+  .ng-invalid .p-autocomplete-input {
+    border-color: var(--app-danger);
+  }
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: 10rem 1fr;
