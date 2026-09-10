@@ -86,4 +86,6 @@
 </div>
 
 <p-toast position="top-right" />
-<p-confirmDialog />
+<!-- 取消 is the safe way out, so it must not compete with the one filled action (刪除). Every
+     confirm() call only sets labels, so this single binding styles the reject button app-wide. -->
+<p-confirmDialog [rejectButtonProps]="{ severity: 'secondary', outlined: true }" />
