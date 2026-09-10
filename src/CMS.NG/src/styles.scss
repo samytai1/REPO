@@ -54,8 +54,16 @@ body {
 body {
   font-family:
     'Segoe UI', 'Noto Sans TC', 'Microsoft JhengHei', system-ui, -apple-system, sans-serif;
+  /* CJK body text needs more leading than Latin; `normal` (~1.2) packed 課程目標 paragraphs tight. */
+  line-height: 1.5;
   color: var(--app-heading);
   background: var(--app-content-bg);
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.25;
 }
 
 /* ---- Shared page chrome, mirrored by every feature page ---- */
