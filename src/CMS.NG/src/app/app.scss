@@ -82,6 +82,7 @@
     font-size: 0.9rem;
     text-align: left;
     cursor: pointer;
+    transition: background 0.15s ease;
 
     &:hover {
       background: var(--app-sidebar-hover);
@@ -117,6 +118,9 @@
   color: var(--app-sidebar-muted);
   font-size: 0.875rem;
   text-decoration: none;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 
   &:hover {
     background: var(--app-sidebar-hover);

@@ -193,4 +193,9 @@ form.ng-submitted {
   .p-datatable-thead > tr > th {
     background: var(--app-table-head-bg);
   }
+
+  /* Codes, prices and counts line up digit for digit. */
+  .p-datatable-tbody > tr > td {
+    font-variant-numeric: tabular-nums;
+  }
 }
