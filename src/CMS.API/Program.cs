@@ -127,11 +127,6 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IPasswordPolicyService, PasswordPolicyService>();
 builder.Services.AddScoped<IDefaultPasswordService, DefaultPasswordService>();
 
-// 異動紀錄 — cross-cutting, so it is registered beside the services rather than per feature. It
-// reads the caller's UserName off the current request, which is what IHttpContextAccessor (already
-// added above for the bearer key resolver) is for.
-builder.Services.AddScoped<IRowAuditWriter, RowAuditWriter>();
-
 var app = builder.Build();
 
 app.UseSwagger();
