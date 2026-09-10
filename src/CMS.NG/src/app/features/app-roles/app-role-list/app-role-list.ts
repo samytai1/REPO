@@ -160,18 +160,28 @@ export class AppRoleList implements OnInit {
     const sortOrder = event.sortOrder ?? event.order;
 
     if (sortField) {
-      this.sort = {
+      const next: SortState = {
         field: Array.isArray(sortField) ? sortField[0] : sortField,
         order: sortOrder ?? 1,
       };
-      this.listState.write(SORT_KEY, this.sort);
+
+      // p-table re-emits (onSort) with its current sort every time the value is assigned — on
+      // the initial load and after every query — so only a sort that actually changed is a user
+      // action. Treating the re-emit as one wiped a restored page back to 0 on every load.
+      if (next.field !== this.sort.field || next.order !== this.sort.order) {
+        this.sort = next;
+        this.listState.write(SORT_KEY, this.sort);
+
+        // A bare sort event carries no page: a new sort order starts from page 1, exactly as the
+        // table's own resetPageOnSort does.
+        if (event.first === undefined) {
+          this.page = { ...this.page, first: 0 };
+        }
+      }
     }
 
     if (event.first !== undefined || event.rows !== undefined) {
       this.page = { first: event.first ?? 0, rows: event.rows ?? this.page.rows };
-    } else if (sortField) {
-      // A bare sort event carries no page: the table starts a new sort order from page 1.
-      this.page = { ...this.page, first: 0 };
     }
 
     this.listState.write(PAGE_KEY, this.page);
